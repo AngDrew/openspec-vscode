@@ -140,6 +140,15 @@ body {
   transform: rotate(-90deg);
 }
 
+/* Override for file sections - use right arrow instead of down arrow */
+.file-header .collapse-icon {
+  transform: rotate(0deg);
+}
+
+.file-header[aria-expanded="true"] .collapse-icon {
+  transform: rotate(90deg);
+}
+
 .section-content {
   padding: 0 20px 20px 20px;
   border-top: 1px solid var(--vscode-border);
@@ -147,6 +156,11 @@ body {
 }
 
 .section-content.collapsed {
+  display: none;
+}
+
+/* Handle hidden attribute for initial state */
+.section-content[hidden] {
   display: none;
 }
 
@@ -212,163 +226,40 @@ body {
   padding: 0;
 }
 
-/* Tasks */
-.tasks-content {
-  line-height: 1.6;
-}
 
-.task-item {
-  margin: 4px 0;
-}
 
-.task-wrapper {
-  display: flex;
-  align-items: flex-start;
-  padding: 8px;
-  border-radius: 4px;
-  transition: background-color 0.2s;
-}
-
-.task-wrapper:hover {
-  background-color: rgba(128, 128, 128, 0.1);
-}
-
-.task-toggle {
-  background: none;
-  border: none;
-  width: 16px;
-  height: 16px;
-  margin-right: 4px;
-  padding: 0;
-  font-size: 0.7em;
-  color: var(--vscode-foreground);
-  cursor: pointer;
+/* File Sections */
+.file-header .section-title {
   display: flex;
   align-items: center;
-  justify-content: center;
-  transition: transform 0.2s ease;
+  gap: 8px;
 }
 
-.task-toggle:hover {
-  background-color: rgba(128, 128, 128, 0.1);
-  border-radius: 2px;
+.file-header .file-icon {
+  font-size: 1.1em;
 }
 
-.task-toggle:focus {
-  outline: 2px solid var(--vscode-focus-border);
-  outline-offset: 1px;
+/* Code Content */
+.code-content {
+  background-color: rgba(0, 0, 0, 0.1);
+  padding: 15px;
+  border-radius: 5px;
+  overflow-x: auto;
+  margin: 0;
 }
 
-.task-toggle[aria-expanded="false"] {
-  transform: rotate(-90deg);
-}
-
-.task-item input[type="checkbox"] {
-  margin-right: 8px;
-  margin-top: 2px;
-  flex-shrink: 0;
-}
-
-.task-text {
-  flex: 1;
+.code-content pre {
+  margin: 0;
+  font-family: var(--vscode-editor-font-family, 'Courier New', monospace);
+  font-size: 0.85em;
+  line-height: 1.4;
+  white-space: pre-wrap;
   word-wrap: break-word;
 }
 
-.task-text:has(+ input:checked) {
-  text-decoration: line-through;
-  opacity: 0.7;
-}
-
-.task-children {
-  margin-left: 24px;
-  padding-left: 12px;
-  border-left: 2px solid var(--vscode-border);
-  transition: all 0.2s ease;
-}
-
-.task-children.collapsed {
-  display: none;
-}
-
-/* Indentation for nested tasks */
-.task-item[data-indent="1"] .task-wrapper {
-  margin-left: 24px;
-}
-
-.task-item[data-indent="2"] .task-wrapper {
-  margin-left: 48px;
-}
-
-.task-item[data-indent="3"] .task-wrapper {
-  margin-left: 72px;
-}
-
-/* Files */
-.files-list {
-  display: grid;
-  gap: 8px;
-}
-
-.file-item {
-  padding: 8px;
-  border-radius: 4px;
-  transition: background-color 0.2s;
-}
-
-.file-item:hover {
-  background-color: rgba(128, 128, 128, 0.1);
-}
-
-.file-link {
-  display: flex;
-  align-items: center;
-  text-decoration: none;
-  color: var(--vscode-foreground);
-  gap: 8px;
-}
-
-.file-link:hover {
-  text-decoration: none;
-  color: var(--vscode-textLink-foreground);
-}
-
-.file-icon {
-  font-size: 1.2em;
-}
-
-.file-name {
-  font-family: var(--vscode-font-family);
-  font-weight: 500;
-}
-
- /* File toggle button styles */
-.file-toggle {
-  width: 100%;
+.code-content code {
   background: none;
-  border: none;
-  cursor: pointer;
-  text-align: left;
-  padding: 8px;
-  border-radius: 4px;
-  transition: background-color 0.2s;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  color: var(--vscode-foreground);
-}
-
-.file-toggle:hover {
-  background-color: rgba(128, 128, 128, 0.1);
-}
-
-.expand-icon {
-  margin-left: auto;
-  font-size: 0.8em;
-  transition: transform 0.2s ease;
-}
-
-.file-toggle[aria-expanded="true"] .expand-icon {
-  transform: rotate(90deg);
+  padding: 0;
 }
 
 /* File content preview */

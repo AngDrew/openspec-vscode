@@ -3,7 +3,15 @@
 
   // Click handler for section headers and task toggles
   document.addEventListener('click', function(event) {
-    // Handle section header clicks
+    // Handle file section headers FIRST (they have both section-header and file-header classes)
+    const fileHeader = event.target.closest('.file-header');
+    if (fileHeader) {
+      event.preventDefault();
+      toggleFileSection(fileHeader);
+      return;
+    }
+    
+    // Handle general section header clicks
     const sectionHeader = event.target.closest('.section-header');
     if (sectionHeader) {
       event.preventDefault();
@@ -11,39 +19,7 @@
       return;
     }
     
-    // Handle file toggle buttons
-    const fileToggle = event.target.closest('.file-toggle');
-    if (fileToggle) {
-      event.preventDefault();
-      const contentDiv = fileToggle.nextElementSibling;
-      const expandIcon = fileToggle.querySelector('.expand-icon');
-      
-      if (contentDiv.hasAttribute('hidden')) {
-        // Request content if not loaded
-        if (!contentDiv.dataset.loaded) {
-          vscode.postMessage({
-            type: 'loadFileContent',
-            filepath: fileToggle.dataset.filepath
-          });
-        }
-        contentDiv.removeAttribute('hidden');
-        fileToggle.setAttribute('aria-expanded', 'true');
-        expandIcon.textContent = '▼';
-      } else {
-        contentDiv.setAttribute('hidden', '');
-        fileToggle.setAttribute('aria-expanded', 'false');
-        expandIcon.textContent = '▶';
-      }
-      return;
-    }
-    
-    // Handle task toggle clicks
-    const taskToggle = event.target.closest('.task-toggle');
-    if (taskToggle) {
-      event.preventDefault();
-      toggleTask(taskToggle);
-      return;
-    }
+
   });
   
   // Toggle function for sections
@@ -66,44 +42,45 @@
     }
   }
   
-  // Toggle function for tasks
-  function toggleTask(toggleButton) {
-    const taskItem = toggleButton.closest('.task-item');
-    const taskId = taskItem.dataset.taskId;
-    const childrenId = `${taskId}-children`;
-    const childrenContainer = document.getElementById(childrenId);
-    const isExpanded = toggleButton.getAttribute('aria-expanded') === 'true';
+  // Toggle function for file sections
+  function toggleFileSection(headerButton) {
+    const section = headerButton.closest('.collapsible-section');
+    const contentId = headerButton.getAttribute('aria-controls');
+    const content = section.querySelector(`#${contentId}`);
+    const isExpanded = headerButton.getAttribute('aria-expanded') === 'true';
+    const filePath = headerButton.dataset.filepath;
     
     if (isExpanded) {
-      // Collapse task
-      toggleButton.setAttribute('aria-expanded', 'false');
-      toggleButton.textContent = '▶';
-      if (childrenContainer) {
-        childrenContainer.classList.add('collapsed');
-      }
-      taskStates.set(taskId, false);
+      // Collapse section
+      headerButton.setAttribute('aria-expanded', 'false');
+      content.classList.add('collapsed');
+      content.setAttribute('hidden', '');
+      const expandIcon = headerButton.querySelector('.collapse-icon');
+      expandIcon.textContent = '▶';
     } else {
-      // Expand task
-      toggleButton.setAttribute('aria-expanded', 'true');
-      toggleButton.textContent = '▼';
-      if (childrenContainer) {
-        childrenContainer.classList.remove('collapsed');
+      // Expand section
+      headerButton.setAttribute('aria-expanded', 'true');
+      content.classList.remove('collapsed');
+      content.removeAttribute('hidden');
+      const expandIcon = headerButton.querySelector('.collapse-icon');
+      expandIcon.textContent = '▼';
+      
+      // Load content if not already loaded
+      if (filePath && !content.dataset.loaded && !content.innerHTML.trim()) {
+        vscode.postMessage({
+          type: 'loadFileContent',
+          filepath: filePath
+        });
       }
-      taskStates.set(taskId, true);
     }
   }
   
-  // Store section and task states for session persistence
-  const sectionStates = new Map();
-  const taskStates = new Map();
 
-  // Handle task checkbox interactions (read-only)
-  document.addEventListener('change', function(event) {
-    if (event.target.type === 'checkbox') {
-      event.preventDefault();
-      return false;
-    }
-  });
+  
+  // Store section states for session persistence
+  const sectionStates = new Map();
+
+
 
   // Add keyboard navigation
   document.addEventListener('keydown', function(event) {
@@ -131,21 +108,20 @@
       // Handle section headers
       if (target.classList.contains('section-header')) {
         event.preventDefault();
-        toggleSection(target);
+        if (target.classList.contains('file-header')) {
+          toggleFileSection(target);
+        } else {
+          toggleSection(target);
+        }
         return;
       }
       
-      // Handle task toggles
-      if (target.classList.contains('task-toggle')) {
-        event.preventDefault();
-        toggleTask(target);
-        return;
-      }
+
     }
     
     // Handle arrow navigation for sections
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-      if (target.classList.contains('section-header') || target.classList.contains('task-toggle')) {
+      if (target.classList.contains('section-header')) {
         event.preventDefault();
         const isDown = event.key === 'ArrowDown';
         navigateToNextCollapsible(target, isDown);
@@ -156,7 +132,7 @@
   
   // Navigate to next/previous collapsible element
   function navigateToNextCollapsible(currentElement, goForward) {
-    const collapsibles = Array.from(document.querySelectorAll('.section-header, .task-toggle'));
+    const collapsibles = Array.from(document.querySelectorAll('.section-header'));
     const currentIndex = collapsibles.indexOf(currentElement);
     
     let nextIndex;
@@ -200,18 +176,31 @@
     if (message.type === 'fileContentLoaded') {
       // Find the content div for this file - escape special characters in filepath
       const escapedPath = message.filepath.replace(/["\\]/g, '\\$&');
-      const contentDiv = document.querySelector(`[data-filepath="${escapedPath}"] + .file-content`);
-      if (contentDiv) {
-        contentDiv.innerHTML = `<pre class="file-preview">${message.content}</pre>`;
-        contentDiv.dataset.loaded = 'true';
+      const headerButton = document.querySelector(`[data-filepath="${escapedPath}"]`);
+      if (headerButton) {
+        const contentId = headerButton.getAttribute('aria-controls');
+        const contentDiv = document.getElementById(contentId);
+        if (contentDiv) {
+          if (message.fileType === 'markdown') {
+            contentDiv.innerHTML = message.content;
+            contentDiv.classList.add('markdown-content');
+          } else {
+            contentDiv.innerHTML = `<pre class="file-preview"><code>${message.content}</code></pre>`;
+          }
+          contentDiv.dataset.loaded = 'true';
+        }
       }
     } else if (message.type === 'fileContentError') {
       // Find the content div for this file - escape special characters in filepath
       const escapedPath = message.filepath.replace(/["\\]/g, '\\$&');
-      const contentDiv = document.querySelector(`[data-filepath="${escapedPath}"] + .file-content`);
-      if (contentDiv) {
-        contentDiv.innerHTML = `<div class="error-message">Error loading file: ${message.error}</div>`;
-        contentDiv.dataset.loaded = 'true';
+      const headerButton = document.querySelector(`[data-filepath="${escapedPath}"]`);
+      if (headerButton) {
+        const contentId = headerButton.getAttribute('aria-controls');
+        const contentDiv = document.getElementById(contentId);
+        if (contentDiv) {
+          contentDiv.innerHTML = `<div class="error-message">Error loading file: ${message.error}</div>`;
+          contentDiv.dataset.loaded = 'true';
+        }
       }
     } else if (message.type === 'themeChanged') {
       // Update CSS custom properties if needed

@@ -67,21 +67,14 @@ export class OpenSpecWebviewProvider implements vscode.WebviewPanelSerializer {
     const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'script.js'));
 
     let proposalContent = '';
-    let tasksContent = '';
     
     if (item.type === 'change' && item.path) {
       try {
         const proposalPath = path.join(item.path, 'proposal.md');
-        const tasksPath = path.join(item.path, 'tasks.md');
         
         if (await WorkspaceUtils.fileExists(proposalPath)) {
           const proposalMarkdown = await WorkspaceUtils.readFile(proposalPath);
           proposalContent = marked(proposalMarkdown);
-        }
-        
-        if (await WorkspaceUtils.fileExists(tasksPath)) {
-          const tasksMarkdown = await WorkspaceUtils.readFile(tasksPath);
-          tasksContent = this.renderTasksWithCheckboxes(tasksMarkdown);
         }
       } catch (error) {
         console.error('Error reading change files:', error);
@@ -122,27 +115,7 @@ export class OpenSpecWebviewProvider implements vscode.WebviewPanelSerializer {
                       </div>
                   ` : ''}
 
-                  ${tasksContent ? `
-                      <div class="collapsible-section" data-section="tasks">
-                          <button class="section-header" tabindex="0" aria-expanded="true" aria-controls="tasks-content">
-                              <span class="section-title">Tasks</span>
-                              <span class="collapse-icon">▼</span>
-                          </button>
-                          <div id="tasks-content" class="section-content tasks-content">
-                              ${tasksContent}
-                          </div>
-                      </div>
-                  ` : ''}
-
-                  <div class="collapsible-section" data-section="files">
-                      <button class="section-header" tabindex="0" aria-expanded="true" aria-controls="files-content">
-                          <span class="section-title">Files</span>
-                          <span class="collapse-icon">▼</span>
-                      </button>
-                      <div id="files-content" class="section-content files-list">
-                          ${await this.renderFilesList(item)}
-                      </div>
-                  </div>
+                  ${await this.renderFilesList(item)}
               </div>
           </div>
           <script src="${scriptUri}"></script>
@@ -151,141 +124,66 @@ export class OpenSpecWebviewProvider implements vscode.WebviewPanelSerializer {
     `;
   }
 
-  private renderTasksWithCheckboxes(tasksMarkdown: string): string {
-    const lines = tasksMarkdown.split('\n');
-    const taskStack: TaskItem[] = [];
-    let nonTaskContent = '';
-    
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      const taskMatch = line.match(/^(\s*)- \[([ x])\] (.+)$/);
-      
-      if (taskMatch) {
-        const [, indent, checked, text] = taskMatch;
-        const indentLevel = Math.floor(indent.length / 2); // Assuming 2 spaces per level
-        const isChecked = checked === 'x';
-        const taskId = `task-${i}`;
-        
-        const taskItem: TaskItem = {
-          id: taskId,
-          text: text,
-          checked: isChecked,
-          indentLevel: indentLevel,
-          hasChildren: false,
-          children: []
-        };
-        
-        // Find parent task
-        while (taskStack.length > indentLevel) {
-          taskStack.pop();
-        }
-        
-        if (taskStack.length === 0) {
-          // This is a top-level task, add to stack
-          taskStack.push(taskItem);
-        } else {
-          // This is a child task, update parent
-          const parent = taskStack[taskStack.length - 1];
-          parent.hasChildren = true;
-          parent.children.push(taskItem);
-        }
-      } else {
-        // Handle headers
-        const headerMatch = line.match(/^(#+)\s+(.+)$/);
-        if (headerMatch) {
-          const [, level, text] = headerMatch;
-          const headerLevel = level.length;
-          nonTaskContent += `<h${headerLevel + 2}>${text}</h${headerLevel + 2}>`;
-        }
-        // Regular text
-        else if (line.trim()) {
-          nonTaskContent += `<p>${line}</p>`;
-        } else {
-          nonTaskContent += '\n';
-        }
-      }
-    }
-    
-    // Render tasks and non-task content
-    return nonTaskContent + this.renderTaskHierarchy(taskStack);
-  }
-  
-  private renderTaskItem(task: TaskItem): string {
-    const hasIcon = task.hasChildren || task.children.length > 0;
-    const iconClass = hasIcon ? 'task-expand-icon' : '';
-    const iconText = task.children.length > 0 ? '▼' : '';
-    
-    return `
-      <div class="task-item" data-task-id="${task.id}" data-indent="${task.indentLevel}">
-        <div class="task-wrapper">
-          ${hasIcon ? `<button class="task-toggle ${iconClass}" aria-expanded="true" aria-controls="${task.id}-children">${iconText}</button>` : ''}
-          <input type="checkbox" ${task.checked ? 'checked' : ''} disabled>
-          <span class="task-text">${task.text}</span>
-        </div>
-        ${task.children.length > 0 ? `
-          <div id="${task.id}-children" class="task-children">
-            ${this.renderTaskChildren(task.children)}
-          </div>
-        ` : ''}
-      </div>
-    `;
-  }
-  
-  private renderTaskChildren(children: TaskItem[]): string {
-    return children.map(child => this.renderTaskItem(child)).join('');
-  }
-  
-  private renderTaskHierarchy(taskStack: TaskItem[]): string {
-    let output = '';
-    const processedTopLevel = new Set<string>();
-    
-    // Render top-level tasks first
-    for (const task of taskStack) {
-      if (task.indentLevel === 0 && !processedTopLevel.has(task.id)) {
-        output += this.renderTaskItem(task);
-        processedTopLevel.add(task.id);
-      }
-    }
-    
-    return output;
-  }
+
 
   private async renderFilesList(item: TreeItemData): Promise<string> {
     if (!item.path) {
-      return '<p>No files available</p>';
+      return '';
     }
 
     try {
       const files = await WorkspaceUtils.listFiles(item.path);
       if (files.length === 0) {
-        return '<p>No files found</p>';
+        return '';
       }
 
-      return files.map(file => {
+      const fileSections = await Promise.all(files.map(async (file) => {
         const filePath = path.join(item.path!, file);
         const fileName = path.basename(filePath);
+        const fileExtension = path.extname(fileName).toLowerCase();
+        const isMarkdown = fileExtension === '.md';
         
         // Escape special characters in file path for HTML attributes
         const escapedPath = filePath.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        const sectionId = `file-${file.replace(/[^a-zA-Z0-9]/g, '-')}`;
+        
+        // Pre-load and render markdown files
+        let contentHtml = '';
+        if (isMarkdown && await WorkspaceUtils.fileExists(filePath)) {
+          try {
+            const fileContent = await WorkspaceUtils.readFile(filePath);
+            contentHtml = marked(fileContent);
+          } catch (error) {
+            console.error(`Error reading markdown file ${filePath}:`, error);
+            contentHtml = '<p>Error loading file content</p>';
+          }
+        }
         
         return `
-          <div class="file-item">
-            <button class="file-toggle" 
+          <div class="collapsible-section" data-section="file">
+            <button class="section-header file-header" 
+                    tabindex="0" 
+                    aria-expanded="false" 
+                    aria-controls="${sectionId}-content"
                     data-filepath="${escapedPath}"
-                    aria-expanded="false"
-                    aria-label="Toggle preview for ${fileName}">
-              <span class="file-icon">📄</span>
-              <span class="file-name">${file}</span>
-              <span class="expand-icon">▶</span>
+                    data-file-type="${isMarkdown ? 'markdown' : 'code'}">
+              <span class="section-title">
+                <span class="file-icon">${isMarkdown ? '📝' : '📄'}</span>
+                ${file}
+              </span>
+              <span class="collapse-icon">▶</span>
             </button>
-            <div class="file-content" hidden>
-              <pre><code></code></pre>
+            <div id="${sectionId}-content" class="section-content ${isMarkdown ? 'markdown-content' : 'code-content'}" hidden>
+              ${contentHtml || '<pre class="file-preview"><code></code></pre>'}
             </div>
           </div>
         `;
-      }).join('');
+      }));
+      
+      return fileSections.join('');
     } catch (error) {
-      return '<p>Error loading files</p>';
+      console.error('Error rendering files list:', error);
+      return '';
     }
   }
 
@@ -297,6 +195,8 @@ export class OpenSpecWebviewProvider implements vscode.WebviewPanelSerializer {
       } else if (message.type === 'loadFileContent') {
         try {
           const fileUri = vscode.Uri.file(message.filepath);
+          const fileExtension = path.extname(fileUri.fsPath).toLowerCase();
+          const isMarkdown = fileExtension === '.md';
           
           // Check file size first (500KB limit)
           const stats = await vscode.workspace.fs.stat(fileUri);
@@ -315,10 +215,17 @@ export class OpenSpecWebviewProvider implements vscode.WebviewPanelSerializer {
           const contentBuffer = await vscode.workspace.fs.readFile(fileUri);
           const content = Buffer.from(contentBuffer).toString('utf8');
           
+          // Process content based on file type
+          let processedContent = content;
+          if (isMarkdown) {
+            processedContent = marked(content);
+          }
+          
           panel.webview.postMessage({
             type: 'fileContentLoaded',
             filepath: message.filepath,
-            content: content
+            content: processedContent,
+            fileType: isMarkdown ? 'markdown' : 'code'
           });
         } catch (error) {
           panel.webview.postMessage({
@@ -332,11 +239,3 @@ export class OpenSpecWebviewProvider implements vscode.WebviewPanelSerializer {
   }
 }
 
-interface TaskItem {
-  id: string;
-  text: string;
-  checked: boolean;
-  indentLevel: number;
-  hasChildren: boolean;
-  children: TaskItem[];
-}
