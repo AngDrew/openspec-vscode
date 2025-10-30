@@ -90,6 +90,66 @@ body {
   padding-bottom: 10px;
 }
 
+/* Collapsible Sections */
+.collapsible-section {
+  margin-bottom: 40px;
+  border: 1px solid var(--vscode-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.section-header {
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 16px 20px;
+  font-family: var(--vscode-font-family);
+  font-size: 1.2em;
+  font-weight: 600;
+  color: var(--vscode-foreground);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  text-align: left;
+  transition: background-color 0.2s;
+}
+
+.section-header:hover {
+  background-color: rgba(128, 128, 128, 0.1);
+}
+
+.section-header:focus {
+  outline: 2px solid var(--vscode-focus-border);
+  outline-offset: -2px;
+}
+
+.section-title {
+  flex: 1;
+}
+
+.collapse-icon {
+  margin-left: 12px;
+  font-size: 0.8em;
+  transition: transform 0.2s ease;
+  color: var(--vscode-foreground);
+  opacity: 0.7;
+}
+
+.section-header[aria-expanded="false"] .collapse-icon {
+  transform: rotate(-90deg);
+}
+
+.section-content {
+  padding: 0 20px 20px 20px;
+  border-top: 1px solid var(--vscode-border);
+  transition: all 0.2s ease;
+}
+
+.section-content.collapsed {
+  display: none;
+}
+
 /* Markdown Content */
 .markdown-content {
   line-height: 1.6;
@@ -158,20 +218,53 @@ body {
 }
 
 .task-item {
+  margin: 4px 0;
+}
+
+.task-wrapper {
   display: flex;
   align-items: flex-start;
-  margin: 8px 0;
   padding: 8px;
   border-radius: 4px;
   transition: background-color 0.2s;
 }
 
-.task-item:hover {
+.task-wrapper:hover {
   background-color: rgba(128, 128, 128, 0.1);
 }
 
+.task-toggle {
+  background: none;
+  border: none;
+  width: 16px;
+  height: 16px;
+  margin-right: 4px;
+  padding: 0;
+  font-size: 0.7em;
+  color: var(--vscode-foreground);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.2s ease;
+}
+
+.task-toggle:hover {
+  background-color: rgba(128, 128, 128, 0.1);
+  border-radius: 2px;
+}
+
+.task-toggle:focus {
+  outline: 2px solid var(--vscode-focus-border);
+  outline-offset: 1px;
+}
+
+.task-toggle[aria-expanded="false"] {
+  transform: rotate(-90deg);
+}
+
 .task-item input[type="checkbox"] {
-  margin-right: 12px;
+  margin-right: 8px;
   margin-top: 2px;
   flex-shrink: 0;
 }
@@ -184,6 +277,30 @@ body {
 .task-text:has(+ input:checked) {
   text-decoration: line-through;
   opacity: 0.7;
+}
+
+.task-children {
+  margin-left: 24px;
+  padding-left: 12px;
+  border-left: 2px solid var(--vscode-border);
+  transition: all 0.2s ease;
+}
+
+.task-children.collapsed {
+  display: none;
+}
+
+/* Indentation for nested tasks */
+.task-item[data-indent="1"] .task-wrapper {
+  margin-left: 24px;
+}
+
+.task-item[data-indent="2"] .task-wrapper {
+  margin-left: 48px;
+}
+
+.task-item[data-indent="3"] .task-wrapper {
+  margin-left: 72px;
 }
 
 /* Files */

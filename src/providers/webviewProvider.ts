@@ -111,29 +111,38 @@ export class OpenSpecWebviewProvider implements vscode.WebviewPanelSerializer {
 
               <div class="content">
                   ${proposalContent ? `
-                      <section class="section">
-                          <h2>Proposal</h2>
-                          <div class="markdown-content">
+                      <div class="collapsible-section" data-section="proposal">
+                          <button class="section-header" tabindex="0" aria-expanded="true" aria-controls="proposal-content">
+                              <span class="section-title">Proposal</span>
+                              <span class="collapse-icon">▼</span>
+                          </button>
+                          <div id="proposal-content" class="section-content markdown-content">
                               ${proposalContent}
                           </div>
-                      </section>
+                      </div>
                   ` : ''}
 
                   ${tasksContent ? `
-                      <section class="section">
-                          <h2>Tasks</h2>
-                          <div class="tasks-content">
+                      <div class="collapsible-section" data-section="tasks">
+                          <button class="section-header" tabindex="0" aria-expanded="true" aria-controls="tasks-content">
+                              <span class="section-title">Tasks</span>
+                              <span class="collapse-icon">▼</span>
+                          </button>
+                          <div id="tasks-content" class="section-content tasks-content">
                               ${tasksContent}
                           </div>
-                      </section>
+                      </div>
                   ` : ''}
 
-                  <section class="section">
-                      <h2>Files</h2>
-                      <div class="files-list">
+                  <div class="collapsible-section" data-section="files">
+                      <button class="section-header" tabindex="0" aria-expanded="true" aria-controls="files-content">
+                          <span class="section-title">Files</span>
+                          <span class="collapse-icon">▼</span>
+                      </button>
+                      <div id="files-content" class="section-content files-list">
                           ${await this.renderFilesList(item)}
                       </div>
-                  </section>
+                  </div>
               </div>
           </div>
           <script src="${scriptUri}"></script>
@@ -143,32 +152,102 @@ export class OpenSpecWebviewProvider implements vscode.WebviewPanelSerializer {
   }
 
   private renderTasksWithCheckboxes(tasksMarkdown: string): string {
-    // Convert markdown task lists to HTML with interactive checkboxes
-    return tasksMarkdown
-      .split('\n')
-      .map(line => {
-        const taskMatch = line.match(/^(\s*)- \[([ x])\] (.+)$/);
-        if (taskMatch) {
-          const [, indent, checked, text] = taskMatch;
-          const isChecked = checked === 'x';
-          return `${indent}<div class="task-item">
-            <input type="checkbox" ${isChecked ? 'checked' : ''} disabled>
-            <span class="task-text">${text}</span>
-          </div>`;
+    const lines = tasksMarkdown.split('\n');
+    const taskStack: TaskItem[] = [];
+    let nonTaskContent = '';
+    
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const taskMatch = line.match(/^(\s*)- \[([ x])\] (.+)$/);
+      
+      if (taskMatch) {
+        const [, indent, checked, text] = taskMatch;
+        const indentLevel = Math.floor(indent.length / 2); // Assuming 2 spaces per level
+        const isChecked = checked === 'x';
+        const taskId = `task-${i}`;
+        
+        const taskItem: TaskItem = {
+          id: taskId,
+          text: text,
+          checked: isChecked,
+          indentLevel: indentLevel,
+          hasChildren: false,
+          children: []
+        };
+        
+        // Find parent task
+        while (taskStack.length > indentLevel) {
+          taskStack.pop();
         }
         
+        if (taskStack.length === 0) {
+          // This is a top-level task, add to stack
+          taskStack.push(taskItem);
+        } else {
+          // This is a child task, update parent
+          const parent = taskStack[taskStack.length - 1];
+          parent.hasChildren = true;
+          parent.children.push(taskItem);
+        }
+      } else {
         // Handle headers
         const headerMatch = line.match(/^(#+)\s+(.+)$/);
         if (headerMatch) {
           const [, level, text] = headerMatch;
           const headerLevel = level.length;
-          return `<h${headerLevel + 2}>${text}</h${headerLevel + 2}>`;
+          nonTaskContent += `<h${headerLevel + 2}>${text}</h${headerLevel + 2}>`;
         }
-        
         // Regular text
-        return line ? `<p>${line}</p>` : '';
-      })
-      .join('\n');
+        else if (line.trim()) {
+          nonTaskContent += `<p>${line}</p>`;
+        } else {
+          nonTaskContent += '\n';
+        }
+      }
+    }
+    
+    // Render tasks and non-task content
+    return nonTaskContent + this.renderTaskHierarchy(taskStack);
+  }
+  
+  private renderTaskItem(task: TaskItem): string {
+    const hasIcon = task.hasChildren || task.children.length > 0;
+    const iconClass = hasIcon ? 'task-expand-icon' : '';
+    const iconText = task.children.length > 0 ? '▼' : '';
+    
+    return `
+      <div class="task-item" data-task-id="${task.id}" data-indent="${task.indentLevel}">
+        <div class="task-wrapper">
+          ${hasIcon ? `<button class="task-toggle ${iconClass}" aria-expanded="true" aria-controls="${task.id}-children">${iconText}</button>` : ''}
+          <input type="checkbox" ${task.checked ? 'checked' : ''} disabled>
+          <span class="task-text">${task.text}</span>
+        </div>
+        ${task.children.length > 0 ? `
+          <div id="${task.id}-children" class="task-children">
+            ${this.renderTaskChildren(task.children)}
+          </div>
+        ` : ''}
+      </div>
+    `;
+  }
+  
+  private renderTaskChildren(children: TaskItem[]): string {
+    return children.map(child => this.renderTaskItem(child)).join('');
+  }
+  
+  private renderTaskHierarchy(taskStack: TaskItem[]): string {
+    let output = '';
+    const processedTopLevel = new Set<string>();
+    
+    // Render top-level tasks first
+    for (const task of taskStack) {
+      if (task.indentLevel === 0 && !processedTopLevel.has(task.id)) {
+        output += this.renderTaskItem(task);
+        processedTopLevel.add(task.id);
+      }
+    }
+    
+    return output;
   }
 
   private async renderFilesList(item: TreeItemData): Promise<string> {
@@ -251,4 +330,13 @@ export class OpenSpecWebviewProvider implements vscode.WebviewPanelSerializer {
       }
     });
   }
+}
+
+interface TaskItem {
+  id: string;
+  text: string;
+  checked: boolean;
+  indentLevel: number;
+  hasChildren: boolean;
+  children: TaskItem[];
 }
