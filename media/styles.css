@@ -1,0 +1,342 @@
+/* VS Code Theme Integration */
+:root {
+  --vscode-font-family: var(--vscode-editor-font-family);
+  --vscode-font-size: var(--vscode-editor-font-size);
+  --vscode-foreground: var(--vscode-foreground);
+  --vscode-background: var(--vscode-editor-background);
+  --vscode-widget-background: var(--vscode-editorWidget-background);
+  --vscode-border: var(--vscode-panel-border);
+  --vscode-focus-border: var(--vscode-focus-border);
+  --vscode-textLink-foreground: var(--vscode-textLink-foreground);
+  --vscode-textBlockQuote-background: var(--vscode-textBlockQuote-background);
+  --vscode-textBlockQuote-border: var(--vscode-textBlockQuote-border);
+  --vscode-button-background: var(--vscode-button-background);
+  --vscode-button-foreground: var(--vscode-button-foreground);
+  --vscode-button-hoverBackground: var(--vscode-button-hoverBackground);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+  color: var(--vscode-foreground);
+  background-color: var(--vscode-background);
+  margin: 0;
+  padding: 0;
+  line-height: 1.5;
+}
+
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+/* Header */
+.header {
+  border-bottom: 1px solid var(--vscode-border);
+  padding-bottom: 20px;
+  margin-bottom: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.header h1 {
+  margin: 0;
+  font-size: 2em;
+  font-weight: 600;
+  color: var(--vscode-foreground);
+}
+
+.status {
+  display: flex;
+  gap: 10px;
+}
+
+.badge {
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 0.8em;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.badge.active {
+  background-color: #007acc;
+  color: white;
+}
+
+.badge.completed {
+  background-color: #4caf50;
+  color: white;
+}
+
+/* Sections */
+.section {
+  margin-bottom: 40px;
+}
+
+.section h2 {
+  margin: 0 0 20px 0;
+  font-size: 1.5em;
+  font-weight: 600;
+  color: var(--vscode-foreground);
+  border-bottom: 2px solid var(--vscode-border);
+  padding-bottom: 10px;
+}
+
+/* Markdown Content */
+.markdown-content {
+  line-height: 1.6;
+}
+
+.markdown-content h3 {
+  margin: 25px 0 15px 0;
+  font-size: 1.2em;
+  font-weight: 600;
+  color: var(--vscode-foreground);
+}
+
+.markdown-content h4 {
+  margin: 20px 0 10px 0;
+  font-size: 1.1em;
+  font-weight: 600;
+  color: var(--vscode-foreground);
+}
+
+.markdown-content p {
+  margin: 10px 0;
+}
+
+.markdown-content ul,
+.markdown-content ol {
+  margin: 10px 0;
+  padding-left: 20px;
+}
+
+.markdown-content li {
+  margin: 5px 0;
+}
+
+.markdown-content blockquote {
+  margin: 15px 0;
+  padding: 10px 20px;
+  border-left: 4px solid var(--vscode-textBlockQuote-border);
+  background-color: var(--vscode-textBlockQuote-background);
+  font-style: italic;
+}
+
+.markdown-content code {
+  font-family: var(--vscode-font-family);
+  background-color: rgba(0, 0, 0, 0.1);
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-size: 0.9em;
+}
+
+.markdown-content pre {
+  background-color: rgba(0, 0, 0, 0.1);
+  padding: 15px;
+  border-radius: 5px;
+  overflow-x: auto;
+  margin: 15px 0;
+}
+
+.markdown-content pre code {
+  background-color: transparent;
+  padding: 0;
+}
+
+/* Tasks */
+.tasks-content {
+  line-height: 1.6;
+}
+
+.task-item {
+  display: flex;
+  align-items: flex-start;
+  margin: 8px 0;
+  padding: 8px;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+}
+
+.task-item:hover {
+  background-color: rgba(128, 128, 128, 0.1);
+}
+
+.task-item input[type="checkbox"] {
+  margin-right: 12px;
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.task-text {
+  flex: 1;
+  word-wrap: break-word;
+}
+
+.task-text:has(+ input:checked) {
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+
+/* Files */
+.files-list {
+  display: grid;
+  gap: 8px;
+}
+
+.file-item {
+  padding: 8px;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+}
+
+.file-item:hover {
+  background-color: rgba(128, 128, 128, 0.1);
+}
+
+.file-link {
+  display: flex;
+  align-items: center;
+  text-decoration: none;
+  color: var(--vscode-foreground);
+  gap: 8px;
+}
+
+.file-link:hover {
+  text-decoration: none;
+  color: var(--vscode-textLink-foreground);
+}
+
+.file-icon {
+  font-size: 1.2em;
+}
+
+.file-name {
+  font-family: var(--vscode-font-family);
+  font-weight: 500;
+}
+
+ /* File toggle button styles */
+.file-toggle {
+  width: 100%;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  padding: 8px;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--vscode-foreground);
+}
+
+.file-toggle:hover {
+  background-color: rgba(128, 128, 128, 0.1);
+}
+
+.expand-icon {
+  margin-left: auto;
+  font-size: 0.8em;
+  transition: transform 0.2s ease;
+}
+
+.file-toggle[aria-expanded="true"] .expand-icon {
+  transform: rotate(90deg);
+}
+
+/* File content preview */
+.file-content {
+  margin-top: 8px;
+  padding: 12px;
+  background-color: rgba(0, 0, 0, 0.1);
+  border-radius: 4px;
+  border-left: 3px solid var(--vscode-textLink-foreground);
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.file-content pre {
+  margin: 0;
+  font-family: var(--vscode-editor-font-family, 'Courier New', monospace);
+  font-size: 0.85em;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.file-content code {
+  background: none;
+  padding: 0;
+}
+
+/* Error state */
+.file-content.error {
+  border-left-color: #ff6b6b;
+  color: #ff6b6b;
+  font-style: italic;
+}
+
+/* Loading state */
+.file-content.loading::before {
+  content: "Loading...";
+  font-style: italic;
+  opacity: 0.7;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .container {
+    padding: 15px;
+  }
+  
+  .header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 15px;
+  }
+  
+  .header h1 {
+    font-size: 1.5em;
+  }
+  
+  .status {
+    align-self: flex-start;
+  }
+}
+
+/* Focus indicators */
+a:focus,
+button:focus,
+input:focus {
+  outline: 2px solid var(--vscode-focus-border);
+  outline-offset: 2px;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--vscode-editor-background);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--vscode-scrollbarSlider-background);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--vscode-scrollbarSlider-hoverBackground);
+}

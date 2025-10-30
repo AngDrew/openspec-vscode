@@ -1,0 +1,118 @@
+{
+  "name": "openspec-vscode",
+  "displayName": "OpenSpec",
+  "description": "VS Code extension for OpenSpec spec-driven development workflow",
+  "version": "0.0.4",
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "onView:openspecExplorer"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "views": {
+      "openspec": [
+        {
+          "id": "openspecExplorer",
+          "name": "OpenSpec Explorer",
+          "when": "openspec:initialized"
+        },
+        {
+          "id": "openspecWelcome",
+          "name": "OpenSpec",
+          "when": "!openspec:initialized"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "openspecWelcome",
+        "contents": "OpenSpec workspace not detected\n[Initialize OpenSpec](command:openspec.init)\n\nLearn more about [OpenSpec](https://github.com/sst/opencode)",
+        "when": "!openspec:initialized"
+      }
+    ],
+    "commands": [
+      {
+        "command": "openspec.viewDetails",
+        "title": "OpenSpec: View Details",
+        "icon": "$(search)"
+      },
+      {
+        "command": "openspec.listChanges",
+        "title": "OpenSpec: List Changes",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "openspec.generateProposal",
+        "title": "OpenSpec: Generate Proposal",
+        "icon": "$(add)"
+      },
+      {
+        "command": "openspec.init",
+        "title": "OpenSpec: Initialize Workspace",
+        "icon": "$(new-file)"
+      },
+      {
+        "command": "openspec.showOutput",
+        "title": "OpenSpec: Show Output",
+        "icon": "$(output)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "openspec.listChanges",
+          "when": "view == openspecExplorer",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "openspec.viewDetails",
+          "when": "view == openspecExplorer && viewItem == change",
+          "group": "inline"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "openspec.listChanges",
+        "key": "ctrl+shift+o",
+        "mac": "cmd+shift+o",
+        "when": "openspec:initialized"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -w",
+    "pretest": "npm run compile && npm run lint && tsc -p ./tsconfig.test.json",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/test/runTest.js",
+    "test:compile": "tsc -p ./ && npm run test"
+  },
+  "devDependencies": {
+    "@types/glob": "^8.1.0",
+    "@types/marked": "^5.0.2",
+    "@types/mocha": "^10.0.1",
+    "@types/node": "16.x",
+    "@types/vscode": "^1.74.0",
+    "@typescript-eslint/eslint-plugin": "^5.45.0",
+    "@typescript-eslint/parser": "^5.45.0",
+    "@vscode/test-electron": "^2.2.2",
+    "eslint": "^8.28.0",
+    "glob": "^8.1.0",
+    "jsdom": "^27.0.1",
+    "mocha": "^10.2.0",
+    "typescript": "^4.9.3"
+  },
+  "dependencies": {
+    "marked": "^5.0.0"
+  }
+}
