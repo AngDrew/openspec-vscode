@@ -154,42 +154,47 @@ The extension SHALL follow VS Code design principles and provide an intuitive in
 - **AND** SHALL show success or error notifications with appropriate messaging
 
 ### Requirement: Collapsible Content Sections
-The webview SHALL provide collapsible sections for major content areas to reduce scrolling and improve navigation.
+The webview SHALL provide collapsible sections for major content areas with a flat hierarchy to reduce scrolling and improve navigation.
 
 #### Scenario: Section Headers Are Collapsible
 - **WHEN** a user views a change in the detailed webview
-- **THEN** each major section (Proposal, Tasks, Files) SHALL have a collapsible header
-- **AND** clicking the header SHALL toggle the section between expanded and collapsed states
+- **THEN** the Proposal section SHALL have a collapsible header
+- **AND** each individual file SHALL have its own collapsible header
+- **AND** clicking any header SHALL toggle that section between expanded and collapsed states
 - **AND** an expand/collapse icon SHALL indicate the current state
 
 #### Scenario: Default Section State
 - **WHEN** a user opens a change for the first time in a webview session
-- **THEN** all sections SHALL be expanded by default
-- **AND** the expand icon SHALL show the sections are open
+- **THEN** the Proposal section SHALL be expanded by default
+- **AND** all file sections SHALL be collapsed by default
+- **AND** the expand/collapse icons SHALL accurately reflect the state
 
 #### Scenario: Keyboard Accessibility
 - **WHEN** a user navigates using keyboard only
-- **THEN** collapsible section headers SHALL be focusable
+- **THEN** all collapsible section headers SHALL be focusable
 - **AND** pressing Enter or Space SHALL toggle the section
 - **AND** the focused element SHALL have visible focus indicators
+- **AND** arrow keys SHALL allow navigation between section headers
 
-### Requirement: Nested Task Collapsibility
-The webview SHALL provide collapsible functionality for individual task items within the Tasks section.
+### Requirement: Markdown File Rendering
+The webview SHALL render markdown files with proper formatting to improve readability.
 
-#### Scenario: Individual Task Toggle
-- **WHEN** viewing the Tasks section
-- **THEN** each top-level task item SHALL be independently collapsible
-- **AND** nested sub-tasks SHALL be hidden when the parent task is collapsed
-- **AND** nested sub-tasks SHALL be visible when the parent task is expanded
+#### Scenario: Markdown File Display
+- **WHEN** a markdown file (.md extension) is displayed in the preview
+- **THEN** the content SHALL be parsed and rendered as HTML with markdown formatting
+- **AND** SHALL support headers, lists, code blocks, links, and other markdown syntax
+- **AND** SHALL use the same markdown rendering as the Proposal section
+- **AND** SHALL respect VS Code theme colors for rendered content
 
-#### Scenario: Task Hierarchy Display
-- **WHEN** tasks have nested sub-tasks
-- **THEN** parent tasks SHALL display a collapse/expand icon
-- **AND** tasks without sub-tasks SHALL not display a collapse icon
-- **AND** the nesting level SHALL be visually indicated through indentation
+#### Scenario: Non-Markdown File Display
+- **WHEN** a non-markdown file is displayed in the preview
+- **THEN** the content SHALL be displayed in a formatted code block
+- **AND** SHALL preserve original formatting and whitespace
+- **AND** SHALL use monospace font appropriate for code
 
-#### Scenario: Task State Independence
-- **WHEN** collapsing or expanding a task
-- **THEN** the state of other tasks SHALL remain unchanged
-- **AND** the state of the parent section SHALL remain unchanged
+#### Scenario: File Type Detection
+- **WHEN** loading a file for display
+- **THEN** the system SHALL detect the file type based on file extension
+- **AND** SHALL apply appropriate rendering (markdown vs code block)
+- **AND** SHALL handle edge cases gracefully (no extension, unknown types default to code block)
 
