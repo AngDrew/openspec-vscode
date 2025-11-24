@@ -57,6 +57,44 @@ function registerCommands(context: vscode.ExtensionContext) {
     vscode.commands.executeCommand('openspecExplorer.focus');
   });
 
+  // Apply change command
+  const applyChangeCommand = vscode.commands.registerCommand('openspec.applyChange', async (item) => {
+    if (!item || !item.label) {
+      vscode.window.showWarningMessage('No change selected');
+      return;
+    }
+
+    // Extract the change ID from the label (folder name in kebab case)
+    const changeId = item.label;
+    const applyText = `/openspec-apply ${changeId}`;
+
+    try {
+      await vscode.env.clipboard.writeText(applyText);
+      vscode.window.showInformationMessage(`Copied: ${applyText}`);
+    } catch (error) {
+      vscode.window.showErrorMessage(`Failed to copy to clipboard: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  });
+
+  // Archive change command
+  const archiveChangeCommand = vscode.commands.registerCommand('openspec.archiveChange', async (item) => {
+    if (!item || !item.label) {
+      vscode.window.showWarningMessage('No change selected');
+      return;
+    }
+
+    // Extract the change ID from the label (folder name in kebab case)
+    const changeId = item.label;
+    const archiveText = `/openspec-archive ${changeId}`;
+
+    try {
+      await vscode.env.clipboard.writeText(archiveText);
+      vscode.window.showInformationMessage(`Copied: ${archiveText}`);
+    } catch (error) {
+      vscode.window.showErrorMessage(`Failed to copy to clipboard: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  });
+
   // Generate proposal command
   const generateProposalCommand = vscode.commands.registerCommand('openspec.generateProposal', () => {
     vscode.window.showInformationMessage(
@@ -89,6 +127,8 @@ function registerCommands(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     viewDetailsCommand,
     listChangesCommand,
+    applyChangeCommand,
+    archiveChangeCommand,
     generateProposalCommand,
     initCommand,
     showOutputCommand

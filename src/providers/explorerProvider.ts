@@ -176,7 +176,7 @@ export class OpenSpecExplorerProvider implements vscode.TreeDataProvider<TreeIte
         label: changeName,
         type: 'change',
         path: changePath,
-        contextValue: 'change',
+        contextValue: 'change:active',
         metadata: {
           isActive: true,
           status: hasProposal && hasTasks ? 'complete' : 'in-progress'
@@ -199,7 +199,7 @@ export class OpenSpecExplorerProvider implements vscode.TreeDataProvider<TreeIte
         label: changeName,
         type: 'change',
         path: changePath,
-        contextValue: 'change',
+        contextValue: 'change:completed',
         metadata: {
           isActive: false,
           status: 'completed'

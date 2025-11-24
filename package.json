@@ -48,6 +48,16 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "openspec.applyChange",
+        "title": "Apply",
+        "icon": "$(play)"
+      },
+      {
+        "command": "openspec.archiveChange",
+        "title": "Archive",
+        "icon": "$(archive)"
+      },
+      {
         "command": "openspec.generateProposal",
         "title": "OpenSpec: Generate Proposal",
         "icon": "$(add)"
@@ -74,8 +84,18 @@
       "view/item/context": [
         {
           "command": "openspec.viewDetails",
-          "when": "view == openspecExplorer && viewItem == change",
-          "group": "inline"
+          "when": "view == openspecExplorer && (viewItem == change:active || viewItem == change:completed)",
+          "group": "navigation"
+        },
+        {
+          "command": "openspec.applyChange",
+          "when": "view == openspecExplorer && viewItem == change:active",
+          "group": "inline@1"
+        },
+        {
+          "command": "openspec.archiveChange",
+          "when": "view == openspecExplorer && viewItem == change:active",
+          "group": "inline@2"
         }
       ]
     },

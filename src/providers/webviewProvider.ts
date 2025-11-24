@@ -31,17 +31,22 @@ export class OpenSpecWebviewProvider implements vscode.WebviewPanelSerializer {
       return;
     }
 
-    const panelKey = `details-${item.id}`;
+    const panelKey = 'details';
     
     if (this._panels.has(panelKey)) {
-      this._panels.get(panelKey)!.reveal();
+      const existingPanel = this._panels.get(panelKey)!;
+      // Update the title to reflect the current change
+      existingPanel.title = `OpenSpec: ${item.label}`;
+      // Update the HTML content
+      existingPanel.webview.html = await this.getHtmlContent(existingPanel.webview, item);
+      existingPanel.reveal();
       return;
     }
 
     const panel = vscode.window.createWebviewPanel(
       'openspec.details',
       `OpenSpec: ${item.label}`,
-      vscode.ViewColumn.Beside,
+      vscode.ViewColumn.Active,
       {
         enableScripts: true,
         localResourceRoots: [
@@ -53,7 +58,7 @@ export class OpenSpecWebviewProvider implements vscode.WebviewPanelSerializer {
     );
 
     panel.webview.html = await this.getHtmlContent(panel.webview, item);
-    this.setupWebviewMessageHandling(panel, item);
+    this.setupWebviewMessageHandling(panel, item, panelKey);
 
     panel.onDidDispose(() => {
       this._panels.delete(panelKey);
@@ -95,11 +100,6 @@ export class OpenSpecWebviewProvider implements vscode.WebviewPanelSerializer {
           <div class="container">
               <header class="header">
                   <h1>${item.label}</h1>
-                  <div class="status">
-                      ${item.metadata?.isActive ? 
-                        '<span class="badge active">Active Change</span>' : 
-                        '<span class="badge completed">Completed Change</span>'}
-                  </div>
               </header>
 
               <div class="content">
@@ -187,7 +187,7 @@ export class OpenSpecWebviewProvider implements vscode.WebviewPanelSerializer {
     }
   }
 
-  private setupWebviewMessageHandling(panel: vscode.WebviewPanel, _item: TreeItemData): void {
+  private setupWebviewMessageHandling(panel: vscode.WebviewPanel, _item: TreeItemData, panelKey: string): void {
     panel.webview.onDidReceiveMessage(async (message) => {
       if (message.type === 'openFile') {
         const fileUri = vscode.Uri.parse(message.uri);
