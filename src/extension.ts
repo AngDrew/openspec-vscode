@@ -96,27 +96,46 @@ function registerCommands(context: vscode.ExtensionContext) {
   });
 
   // Generate proposal command
-  const generateProposalCommand = vscode.commands.registerCommand('openspec.generateProposal', () => {
-    vscode.window.showInformationMessage(
-      'Generate Proposal feature coming soon! For now, use `openspec create-proposal` in the terminal.',
-      'Open Terminal'
-    ).then(selection => {
-      if (selection === 'Open Terminal') {
-        vscode.commands.executeCommand('workbench.action.terminal.new');
+  const generateProposalCommand = vscode.commands.registerCommand('openspec.generateProposal', async () => {
+    const changeId = await vscode.window.showInputBox({
+      prompt: 'Enter a change ID (kebab-case, verb-led)',
+      placeHolder: 'add-new-feature',
+      validateInput: (value) => {
+        if (!value) return 'Change ID is required';
+        if (!/^[a-z][a-z0-9-]+$/.test(value)) {
+          return 'Use kebab-case, starting with a letter';
+        }
+        return null;
       }
     });
+
+    if (!changeId) {
+      return;
+    }
+
+    const commandText = `openspec create-proposal ${changeId}`;
+    const choice = await vscode.window.showInformationMessage(
+      `Ready to run: ${commandText}`,
+      'Run in Terminal',
+      'Copy Command'
+    );
+
+    if (choice === 'Run in Terminal') {
+      const terminal = vscode.window.createTerminal({ name: 'OpenSpec' });
+      terminal.show(true);
+      terminal.sendText(commandText, true);
+    } else if (choice === 'Copy Command') {
+      await vscode.env.clipboard.writeText(commandText);
+      vscode.window.showInformationMessage('Command copied to clipboard');
+    }
   });
 
   // Initialize workspace command
-  const initCommand = vscode.commands.registerCommand('openspec.init', () => {
-    vscode.window.showInformationMessage(
-      'To initialize an OpenSpec workspace, run `openspec init` in the terminal.',
-      'Open Terminal'
-    ).then(selection => {
-      if (selection === 'Open Terminal') {
-        vscode.commands.executeCommand('workbench.action.terminal.new');
-      }
-    });
+  const initCommand = vscode.commands.registerCommand('openspec.init', async () => {
+    const terminal = vscode.window.createTerminal({ name: 'OpenSpec Init' });
+    terminal.show(true);
+    terminal.sendText('openspec init', true);
+    vscode.window.showInformationMessage('Initialized terminal with `openspec init`');
   });
 
   // Show output command

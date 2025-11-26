@@ -66,7 +66,7 @@
       expandIcon.textContent = '▼';
       
       // Load content if not already loaded
-      if (filePath && !content.dataset.loaded && !content.innerHTML.trim()) {
+      if (filePath && !content.dataset.loaded) {
         vscode.postMessage({
           type: 'loadFileContent',
           filepath: filePath
@@ -145,13 +145,8 @@
     collapsibles[nextIndex].focus();
   }
 
-  // Initialize tooltips for better UX
-  function initializeTooltips() {
-    const fileToggles = document.querySelectorAll('.file-toggle');
-    fileToggles.forEach(toggle => {
-      toggle.title = 'Click to expand/collapse file preview';
-    });
-
+  // Initialize tooltips and link handling for better UX
+  function initializeEnhancements() {
     const badges = document.querySelectorAll('.badge');
     badges.forEach(badge => {
       if (badge.classList.contains('active')) {
@@ -160,13 +155,27 @@
         badge.title = 'This change has been completed and archived';
       }
     });
+
+    const specLinks = document.querySelectorAll('.spec-link');
+    specLinks.forEach(link => {
+      link.addEventListener('click', (event) => {
+        event.preventDefault();
+        const filepath = link.getAttribute('data-filepath');
+        if (filepath) {
+          vscode.postMessage({
+            type: 'openFile',
+            filepath
+          });
+        }
+      });
+    });
   }
 
   // Initialize when DOM is ready
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initializeTooltips);
+    document.addEventListener('DOMContentLoaded', initializeEnhancements);
   } else {
-    initializeTooltips();
+    initializeEnhancements();
   }
 
   // Handle messages from VS Code extension

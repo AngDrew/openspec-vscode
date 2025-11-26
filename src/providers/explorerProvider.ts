@@ -167,9 +167,6 @@ export class OpenSpecExplorerProvider implements vscode.TreeDataProvider<TreeIte
       if (changeName === 'archive') continue; // Skip archive directory
 
       const changePath = path.join(changesDir, changeName);
-      
-      const hasProposal = await WorkspaceUtils.hasFile(changePath, 'proposal.md');
-      const hasTasks = await WorkspaceUtils.hasFile(changePath, 'tasks.md');
 
       items.push({
         id: `change-${changeName}`,
@@ -179,9 +176,10 @@ export class OpenSpecExplorerProvider implements vscode.TreeDataProvider<TreeIte
         contextValue: 'change:active',
         metadata: {
           isActive: true,
-          status: hasProposal && hasTasks ? 'complete' : 'in-progress'
+          status: 'in-progress'
         }
       });
+
     }
 
     return items.sort((a, b) => a.label.localeCompare(b.label));

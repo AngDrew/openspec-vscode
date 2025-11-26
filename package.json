@@ -1,8 +1,9 @@
 {
   "name": "openspec-vscode",
-  "displayName": "OpenSpec",
+  "displayName": "OpenSpec VSCode",
   "description": "VS Code extension for OpenSpec spec-driven development workflow",
-  "version": "0.0.4",
+  "version": "0.0.5",
+  "publisher": "AngDrew",
   "engines": {
     "vscode": "^1.74.0"
   },
@@ -15,6 +16,15 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "openspec",
+          "title": "OpenSpec",
+          "icon": "media/openspec-icon.svg"
+        }
+      ]
+    },
     "views": {
       "openspec": [
         {
@@ -41,72 +51,9 @@
         "command": "openspec.viewDetails",
         "title": "OpenSpec: View Details",
         "icon": "$(search)"
-      },
-      {
-        "command": "openspec.listChanges",
-        "title": "OpenSpec: List Changes",
-        "icon": "$(refresh)"
-      },
-      {
-        "command": "openspec.applyChange",
-        "title": "Apply",
-        "icon": "$(play)"
-      },
-      {
-        "command": "openspec.archiveChange",
-        "title": "Archive",
-        "icon": "$(archive)"
-      },
-      {
-        "command": "openspec.generateProposal",
-        "title": "OpenSpec: Generate Proposal",
-        "icon": "$(add)"
-      },
-      {
-        "command": "openspec.init",
-        "title": "OpenSpec: Initialize Workspace",
-        "icon": "$(new-file)"
-      },
-      {
-        "command": "openspec.showOutput",
-        "title": "OpenSpec: Show Output",
-        "icon": "$(output)"
       }
     ],
-    "menus": {
-      "view/title": [
-        {
-          "command": "openspec.listChanges",
-          "when": "view == openspecExplorer",
-          "group": "navigation"
-        }
-      ],
-      "view/item/context": [
-        {
-          "command": "openspec.viewDetails",
-          "when": "view == openspecExplorer && (viewItem == change:active || viewItem == change:completed)",
-          "group": "navigation"
-        },
-        {
-          "command": "openspec.applyChange",
-          "when": "view == openspecExplorer && viewItem == change:active",
-          "group": "inline@1"
-        },
-        {
-          "command": "openspec.archiveChange",
-          "when": "view == openspecExplorer && viewItem == change:active",
-          "group": "inline@2"
-        }
-      ]
-    },
-    "keybindings": [
-      {
-        "command": "openspec.listChanges",
-        "key": "ctrl+shift+o",
-        "mac": "cmd+shift+o",
-        "when": "openspec:initialized"
-      }
-    ]
+    "keybindings": []
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
