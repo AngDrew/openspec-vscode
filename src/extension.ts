@@ -66,13 +66,35 @@ function registerCommands(context: vscode.ExtensionContext) {
 
     // Extract the change ID from the label (folder name in kebab case)
     const changeId = item.label;
-    const applyText = `/openspec-apply ${changeId}`;
 
     try {
-      await vscode.env.clipboard.writeText(applyText);
-      vscode.window.showInformationMessage(`Copied: ${applyText}`);
+      // Get configuration
+      const config = vscode.workspace.getConfiguration('openspec');
+      const template = config.get<string>('openspec.applyCommandTemplate', 'opencode --prompt "/openspec-apply"');
+
+      // Replace placeholder
+      const commandText = template.includes('$changes')
+        ? template.replace(/\$changes/g, changeId)
+        : template;
+
+      // Create and use a terminal
+      const terminalName = `OpenSpec Apply: ${changeId}`;
+      const terminal = vscode.window.createTerminal({ name: terminalName });
+      terminal.show(true);
+      terminal.sendText(commandText, true);
+
+      vscode.window.showInformationMessage(
+        `Running: ${commandText}`,
+        'Open Terminal'
+      ).then(selection => {
+        if (selection === 'Open Terminal') {
+          terminal.show();
+        }
+      });
     } catch (error) {
-      vscode.window.showErrorMessage(`Failed to copy to clipboard: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      vscode.window.showErrorMessage(
+        `Failed to execute command: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
     }
   });
 
@@ -85,13 +107,35 @@ function registerCommands(context: vscode.ExtensionContext) {
 
     // Extract the change ID from the label (folder name in kebab case)
     const changeId = item.label;
-    const archiveText = `/openspec-archive ${changeId}`;
 
     try {
-      await vscode.env.clipboard.writeText(archiveText);
-      vscode.window.showInformationMessage(`Copied: ${archiveText}`);
+      // Get configuration
+      const config = vscode.workspace.getConfiguration('openspec');
+      const template = config.get<string>('openspec.archiveCommandTemplate', 'opencode --prompt "/openspec-archive $changes"');
+
+      // Replace placeholder
+      const commandText = template.includes('$changes')
+        ? template.replace(/\$changes/g, changeId)
+        : template;
+
+      // Create and use a terminal
+      const terminalName = `OpenSpec Archive: ${changeId}`;
+      const terminal = vscode.window.createTerminal({ name: terminalName });
+      terminal.show(true);
+      terminal.sendText(commandText, true);
+
+      vscode.window.showInformationMessage(
+        `Running: ${commandText}`,
+        'Open Terminal'
+      ).then(selection => {
+        if (selection === 'Open Terminal') {
+          terminal.show();
+        }
+      });
     } catch (error) {
-      vscode.window.showErrorMessage(`Failed to copy to clipboard: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      vscode.window.showErrorMessage(
+        `Failed to execute command: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
     }
   });
 

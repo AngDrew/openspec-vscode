@@ -51,9 +51,48 @@
         "command": "openspec.viewDetails",
         "title": "OpenSpec: View Details",
         "icon": "$(search)"
+      },
+      {
+        "command": "openspec.applyChange",
+        "title": "Apply Change",
+        "icon": "$(check)"
+      },
+      {
+        "command": "openspec.archiveChange",
+        "title": "Archive Change",
+        "icon": "$(archive)"
       }
     ],
-    "keybindings": []
+    "menus": {
+      "view/item/context": [
+        {
+          "command": "openspec.applyChange",
+          "when": "view == openspecExplorer && viewItem == change:active",
+          "group": "inline"
+        },
+        {
+          "command": "openspec.archiveChange",
+          "when": "view == openspecExplorer && viewItem == change:active",
+          "group": "inline"
+        }
+      ]
+    },
+    "keybindings": [],
+    "configuration": {
+      "title": "OpenSpec",
+      "properties": {
+        "openspec.applyCommandTemplate": {
+          "type": "string",
+          "default": "opencode --prompt \"/openspec-apply\"",
+          "description": "Command template to run when Apply is pressed. Use $changes as a placeholder for the change ID."
+        },
+        "openspec.archiveCommandTemplate": {
+          "type": "string",
+          "default": "opencode --prompt \"/openspec-archive $changes\"",
+          "description": "Command template to run when Archive is pressed. Use $changes as a placeholder for the change ID."
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",

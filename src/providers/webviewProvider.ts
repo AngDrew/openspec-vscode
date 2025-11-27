@@ -305,7 +305,7 @@ export class OpenSpecWebviewProvider implements vscode.WebviewPanelSerializer {
     return parts.slice(0, openspecIndex + 1).join(path.sep);
   }
 
-  private setupWebviewMessageHandling(panel: vscode.WebviewPanel, _item: TreeItemData, panelKey: string): void {
+  private setupWebviewMessageHandling(panel: vscode.WebviewPanel, _item: TreeItemData, _panelKey: string): void {
     panel.webview.onDidReceiveMessage(async (message) => {
       if (message.type === 'openFile') {
         const fileUri = message.filepath
