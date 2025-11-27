@@ -10,7 +10,7 @@
       toggleFileSection(fileHeader);
       return;
     }
-    
+
     // Handle general section header clicks
     const sectionHeader = event.target.closest('.section-header');
     if (sectionHeader) {
@@ -18,7 +18,7 @@
       toggleSection(sectionHeader);
       return;
     }
-    
+
 
   });
   
