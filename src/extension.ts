@@ -70,7 +70,7 @@ function registerCommands(context: vscode.ExtensionContext) {
     try {
       // Get configuration
       const config = vscode.workspace.getConfiguration('openspec');
-      const template = config.get<string>('openspec.applyCommandTemplate', 'opencode --prompt "/openspec-apply"');
+      const template = config.get<string>('applyCommandTemplate', 'opencode --prompt "/openspec-apply"');
 
       // Replace placeholder
       const commandText = template.includes('$changes')
@@ -111,7 +111,7 @@ function registerCommands(context: vscode.ExtensionContext) {
     try {
       // Get configuration
       const config = vscode.workspace.getConfiguration('openspec');
-      const template = config.get<string>('openspec.archiveCommandTemplate', 'opencode --prompt "/openspec-archive $changes"');
+      const template = config.get<string>('archiveCommandTemplate', 'opencode --prompt "/openspec-archive $changes"');
 
       // Replace placeholder
       const commandText = template.includes('$changes')
