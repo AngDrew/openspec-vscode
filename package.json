@@ -19,19 +19,7 @@
     "Other"
   ],
   "activationEvents": [
-    "onStartupFinished",
-    "onCommand:openspec.viewDetails",
-    "onCommand:openspec.init",
-    "onCommand:openspec.applyChange",
-    "onCommand:openspec.ffChange",
-    "onCommand:openspec.archiveChange",
-    "onCommand:openspec.opencode.startServer",
-    "onCommand:openspec.opencode.openUi",
-    "onCommand:openspec.opencode.newChange",
-    "onCommand:openspec.opencode.generateRunnerScript",
-    "onCommand:openspec.opencode.runRunnerAttached",
-    "onView:openspecExplorer",
-    "onView:openspecWelcome"
+    "onStartupFinished"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -91,13 +79,16 @@
       },
       {
         "command": "openspec.archiveChange",
-        "title": "Archive Change",
+        "title": "OpenSpec: Archive Change",
         "icon": "$(archive)"
       },
       {
         "command": "openspec.opencode.startServer",
         "title": "OpenSpec: Start OpenCode Server",
-        "icon": "$(debug-start)"
+        "icon": {
+          "light": "media/opencode-logo-light.svg",
+          "dark": "media/opencode-logo-dark.svg"
+        }
       },
       {
         "command": "openspec.opencode.openUi",
@@ -159,22 +150,7 @@
         }
       ]
     },
-    "keybindings": [],
-    "configuration": {
-      "title": "OpenSpec",
-      "properties": {
-        "openspec.applyCommandTemplate": {
-          "type": "string",
-          "default": "opencode --prompt \"/openspec-apply\"",
-          "description": "Command template to run when Apply is pressed. Use $changes as a placeholder for the change ID."
-        },
-        "openspec.archiveCommandTemplate": {
-          "type": "string",
-          "default": "opencode --prompt \"/openspec-archive $changes\"",
-          "description": "Command template to run when Archive is pressed. Use $changes as a placeholder for the change ID."
-        }
-      }
-    }
+    "keybindings": []
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",

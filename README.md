@@ -117,7 +117,7 @@ Use the inline **Archive Change** action. The extension will best-effort check w
 ### Configuration
 
 - Port: the OpenCode server integration assumes `http://localhost:4099`.
-- Settings in `package.json` include `openspec.applyCommandTemplate` and `openspec.archiveCommandTemplate`, but the current implementation primarily uses the built-in OpenCode runner/skill prompts rather than templated shell commands.
+
 
 ## Roadmap
 
