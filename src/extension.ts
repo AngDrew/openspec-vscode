@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { OpenSpecExplorerProvider } from './providers/explorerProvider';
 import { OpenSpecWebviewProvider } from './providers/webviewProvider';
 import { WorkspaceUtils } from './utils/workspace';
@@ -9,6 +10,17 @@ let explorerProvider: OpenSpecExplorerProvider;
 let webviewProvider: OpenSpecWebviewProvider;
 let fileWatcher: vscode.FileSystemWatcher;
 let cacheManager: CacheManager;
+let openCodeServerTerminal: vscode.Terminal | undefined;
+let openCodeRunnerTerminal: vscode.Terminal | undefined;
+
+function pickNodeCommand(): string {
+  const base = path.basename(process.execPath).toLowerCase();
+  if (base === 'node' || base === 'node.exe') {
+    return process.execPath;
+  }
+  // Fallback to PATH resolution (eg. user shell / remote environment).
+  return 'node';
+}
 
 export function activate(context: vscode.ExtensionContext) {
   console.log('OpenSpec extension is now active!');
@@ -64,36 +76,16 @@ function registerCommands(context: vscode.ExtensionContext) {
       return;
     }
 
-    // Extract the change ID from the label (folder name in kebab case)
-    const changeId = item.label;
-
     try {
-      // Get configuration
-      const config = vscode.workspace.getConfiguration('openspec');
-      const template = config.get<string>('applyCommandTemplate', 'opencode --prompt "/openspec-apply"');
-
-      // Replace placeholder
-      const commandText = template.includes('$changes')
-        ? template.replace(/\$changes/g, changeId)
-        : template;
-
-      // Create and use a terminal
-      const terminalName = `OpenSpec Apply: ${changeId}`;
-      const terminal = vscode.window.createTerminal({ name: terminalName });
-      terminal.show(true);
-      terminal.sendText(commandText, true);
-
-      vscode.window.showInformationMessage(
-        `Running: ${commandText}`,
-        'Open Terminal'
-      ).then(selection => {
-        if (selection === 'Open Terminal') {
-          terminal.show();
-        }
+      // Apply is the Ralph loop: generate runner and run attached.
+      // This mirrors the spec behavior (task loop parity) using the cross-platform script.
+      await vscode.commands.executeCommand('openspec.opencode.runRunnerAttached', {
+        url: 'http://localhost:4099',
+        changeId: item.label
       });
     } catch (error) {
       vscode.window.showErrorMessage(
-        `Failed to execute command: ${error instanceof Error ? error.message : 'Unknown error'}`
+        `Failed to start Ralph runner: ${error instanceof Error ? error.message : 'Unknown error'}`
       );
     }
   });
@@ -109,35 +101,159 @@ function registerCommands(context: vscode.ExtensionContext) {
     const changeId = item.label;
 
     try {
-      // Get configuration
-      const config = vscode.workspace.getConfiguration('openspec');
-      const template = config.get<string>('archiveCommandTemplate', 'opencode --prompt "/openspec-archive $changes"');
-
-      // Replace placeholder
-      const commandText = template.includes('$changes')
-        ? template.replace(/\$changes/g, changeId)
-        : template;
-
-      // Create and use a terminal
       const terminalName = `OpenSpec Archive: ${changeId}`;
       const terminal = vscode.window.createTerminal({ name: terminalName });
       terminal.show(true);
-      terminal.sendText(commandText, true);
 
-      vscode.window.showInformationMessage(
-        `Running: ${commandText}`,
-        'Open Terminal'
-      ).then(selection => {
-        if (selection === 'Open Terminal') {
-          terminal.show();
+      let tasksStatusLine = 'Tasks: unknown';
+      try {
+        const tasksPath = typeof item.path === 'string' ? path.join(item.path, 'tasks.md') : '';
+        if (tasksPath && await WorkspaceUtils.fileExists(tasksPath)) {
+          const content = await WorkspaceUtils.readFile(tasksPath);
+          const unchecked = (content.match(/^- \[ \] /gm) || []).length;
+          tasksStatusLine = unchecked === 0
+            ? 'Tasks: completed'
+            : `Tasks: NOT completed (${unchecked} unchecked)`;
+          if (unchecked > 0) {
+            vscode.window.showWarningMessage(`${changeId}: ${tasksStatusLine}`);
+          } else {
+            vscode.window.showInformationMessage(`${changeId}: ${tasksStatusLine}`);
+          }
         }
-      });
+      } catch {
+        // best-effort
+      }
+
+      // User-requested archive prompt content (delegated to opencode).
+      const prompt =
+        'use openspec skill to archive the changes, use question tools when there is multiple spec. let the user know if the tasks is completed or not. '
+        + `Change: ${changeId}. ${tasksStatusLine}.`;
+
+      // Feed opencode a direct prompt. (Matches existing extension pattern of delegating workflows to opencode.)
+      terminal.sendText(`opencode --prompt ${JSON.stringify(prompt)}`, true);
     } catch (error) {
       vscode.window.showErrorMessage(
-        `Failed to execute command: ${error instanceof Error ? error.message : 'Unknown error'}`
+        `Failed to start archive flow: ${error instanceof Error ? error.message : 'Unknown error'}`
       );
     }
   });
+
+  // Start OpenCode server command
+  const startOpenCodeServerCommand = vscode.commands.registerCommand('openspec.opencode.startServer', async () => {
+    try {
+      const alreadyListening = await WorkspaceUtils.isOpenCodeServerListening();
+      if (alreadyListening) {
+        vscode.window.showInformationMessage('OpenCode server already running on port 4099');
+        return;
+      }
+
+      if (!openCodeServerTerminal) {
+        openCodeServerTerminal = vscode.window.createTerminal({ name: 'OpenCode Server' });
+      }
+
+      openCodeServerTerminal.show(true);
+      openCodeServerTerminal.sendText('opencode serve --port 4099', true);
+    } catch (error) {
+      vscode.window.showErrorMessage(
+        `Failed to start OpenCode server: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
+    }
+  });
+
+  // Runner script is bundled with the extension (no workspace writes)
+  const generateRunnerScriptCommand = vscode.commands.registerCommand('openspec.opencode.generateRunnerScript', async () => {
+    const sourceUri = vscode.Uri.joinPath(context.extensionUri, 'ralph_opencode.mjs');
+
+    try {
+      await vscode.workspace.fs.stat(sourceUri);
+
+      const selection = await vscode.window.showInformationMessage(
+        'Ralph runner is bundled with the extension (no workspace files created).',
+        'Open Bundled File',
+        'Reveal in Explorer'
+      );
+
+      if (selection === 'Open Bundled File') {
+        await vscode.window.showTextDocument(sourceUri, { preview: false });
+      } else if (selection === 'Reveal in Explorer') {
+        await vscode.commands.executeCommand('revealFileInOS', sourceUri);
+      }
+    } catch (error) {
+      ErrorHandler.handle(error as Error, 'Failed to locate bundled runner script');
+      vscode.window.showErrorMessage(
+        `Failed to generate runner script: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
+    }
+  });
+
+  // Generate runner script and run it attached to OpenCode
+  const runRunnerAttachedCommand = vscode.commands.registerCommand(
+    'openspec.opencode.runRunnerAttached',
+    async (attachUrl?: unknown) => {
+      const workspaceFolders = vscode.workspace.workspaceFolders;
+      if (!workspaceFolders || workspaceFolders.length === 0) {
+        vscode.window.showWarningMessage('No workspace folder found');
+        return;
+      }
+
+      let url = 'http://localhost:4099';
+      let changeId = '';
+      if (typeof attachUrl === 'string' && attachUrl.trim().length > 0) {
+        url = attachUrl.trim();
+      } else if (attachUrl && typeof attachUrl === 'object') {
+        const payload = attachUrl as Record<string, unknown>;
+        const maybeUrl = payload.url;
+        const maybeChangeId = payload.changeId;
+        if (typeof maybeUrl === 'string' && maybeUrl.trim().length > 0) {
+          url = maybeUrl.trim();
+        }
+        if (typeof maybeChangeId === 'string' && maybeChangeId.trim().length > 0) {
+          changeId = maybeChangeId.trim();
+        }
+      }
+
+      const workspaceRoot = workspaceFolders[0].uri;
+      const runnerUri = vscode.Uri.joinPath(context.extensionUri, 'ralph_opencode.mjs');
+
+      try {
+        await vscode.workspace.fs.stat(runnerUri);
+
+        // Create a dedicated terminal that directly executes Node with args.
+        // This avoids shell-specific quoting issues across cmd.exe / PowerShell / bash.
+        if (openCodeRunnerTerminal) {
+          openCodeRunnerTerminal.dispose();
+        }
+
+        const nodeCmd = pickNodeCommand();
+        const args: string[] = [runnerUri.fsPath, '--attach', url];
+        if (changeId) {
+          args.push('--change', changeId);
+        }
+
+        // Provide a sane default for environments where `opencode` isn't on PATH.
+        // The runner will attempt direct `opencode` first, then fall back to `npx -y opencode-ai@1.1.40`.
+        const env = {
+          ...process.env,
+          OPENCODE_NPX_PKG: process.env.OPENCODE_NPX_PKG || 'opencode-ai@1.1.40'
+        };
+
+        openCodeRunnerTerminal = vscode.window.createTerminal({
+          name: 'OpenCode Runner',
+          cwd: workspaceRoot.fsPath,
+          shellPath: nodeCmd,
+          shellArgs: args,
+          env
+        });
+
+        openCodeRunnerTerminal.show(true);
+      } catch (error) {
+        ErrorHandler.handle(error as Error, 'Failed to run runner script');
+        vscode.window.showErrorMessage(
+          `Failed to run runner script: ${error instanceof Error ? error.message : 'Unknown error'}`
+        );
+      }
+    }
+  );
 
   // Generate proposal command
   const generateProposalCommand = vscode.commands.registerCommand('openspec.generateProposal', async () => {
@@ -192,6 +308,9 @@ function registerCommands(context: vscode.ExtensionContext) {
     listChangesCommand,
     applyChangeCommand,
     archiveChangeCommand,
+    startOpenCodeServerCommand,
+    generateRunnerScriptCommand,
+    runRunnerAttachedCommand,
     generateProposalCommand,
     initCommand,
     showOutputCommand
@@ -206,7 +325,9 @@ function setupFileWatcher(context: vscode.ExtensionContext) {
   }
 
   const workspaceFolder = workspaceFolders[0];
-  const openspecGlob = new vscode.RelativePattern(workspaceFolder, '**/openspec/**');
+  // Only watch the workspace-root openspec folder.
+  // This avoids accidentally binding to nested examples (e.g. testingproject/openspec).
+  const openspecGlob = new vscode.RelativePattern(workspaceFolder, 'openspec/**');
   
   try {
     fileWatcher = vscode.workspace.createFileSystemWatcher(openspecGlob);

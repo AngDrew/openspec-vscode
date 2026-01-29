@@ -6,7 +6,7 @@ interface CacheEntry<T> {
 
 export class CacheManager {
   private static instance: CacheManager;
-  private cache = new Map<string, CacheEntry<any>>();
+  private cache = new Map<string, CacheEntry<unknown>>();
   private cleanupInterval: NodeJS.Timeout;
 
   private constructor() {
@@ -42,7 +42,7 @@ export class CacheManager {
       return null;
     }
 
-    return entry.data;
+    return entry.data as T;
   }
 
   has(key: string): boolean {

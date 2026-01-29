@@ -1,8 +1,59 @@
 (function() {
   'use strict';
 
+  const OPENCODE_STATUS_POLL_MS = 2000;
+  const OPENSPEC_TASKS_POLL_MS = 2000;
+
   // Click handler for section headers and task toggles
   document.addEventListener('click', function(event) {
+    const openFileButton = event.target.closest('[data-open-file]');
+    if (openFileButton) {
+      event.preventDefault();
+      const filepath = openFileButton.getAttribute('data-open-file');
+      if (filepath) {
+        vscode.postMessage({
+          type: 'openFile',
+          filepath,
+          preview: true
+        });
+      }
+      return;
+    }
+
+    const attachButton = event.target.closest('[data-opencode-attach]');
+    if (attachButton) {
+      event.preventDefault();
+      const url = attachButton.getAttribute('data-opencode-attach') || 'http://localhost:4099';
+      vscode.postMessage({
+        type: 'opencodeAttachClicked',
+        url
+      });
+      return;
+    }
+
+    const openCodeDot = event.target.closest('.opencode-dot');
+    if (openCodeDot) {
+      event.preventDefault();
+      const status = openCodeDot.getAttribute('data-opencode-status');
+      vscode.postMessage({
+        type: 'opencodeDotClicked',
+        status
+      });
+      return;
+    }
+
+    const openCodeStartButton = event.target.closest('[data-opencode-start]');
+    if (openCodeStartButton) {
+      event.preventDefault();
+      const isDisabled = openCodeStartButton.disabled || openCodeStartButton.getAttribute('aria-disabled') === 'true';
+      if (!isDisabled) {
+        vscode.postMessage({
+          type: 'opencodeStartClicked'
+        });
+      }
+      return;
+    }
+
     // Handle file section headers FIRST (they have both section-header and file-header classes)
     const fileHeader = event.target.closest('.file-header');
     if (fileHeader) {
@@ -199,6 +250,8 @@
           contentDiv.dataset.loaded = 'true';
         }
       }
+
+      maybeUpdateArtifactBodyFromFileContent(message);
     } else if (message.type === 'fileContentError') {
       // Find the content div for this file - escape special characters in filepath
       const escapedPath = message.filepath.replace(/["\\]/g, '\\$&');
@@ -216,8 +269,76 @@
       document.documentElement.style.setProperty('--vscode-foreground', message.foreground);
       document.documentElement.style.setProperty('--vscode-background', message.background);
       // Add other theme properties as needed
+    } else if (message.type === 'opencodeStatusResponse') {
+      updateOpenCodeDotFromStatus(message);
     }
   });
+
+  function maybeUpdateArtifactBodyFromFileContent(message) {
+    const filepath = typeof message.filepath === 'string' ? message.filepath : '';
+    if (!filepath) return;
+
+    const escapedPath = filepath.replace(/["\\]/g, '\\$&');
+    const container = document.querySelector(`[data-openspec-artifact-file="${escapedPath}"]`);
+    if (!container) return;
+
+    const body = container.querySelector('[data-openspec-artifact-body]');
+    if (!body) return;
+
+    const nextHtml = typeof message.content === 'string' ? message.content : '';
+    if (!nextHtml) return;
+
+    if (body.innerHTML !== nextHtml) {
+      body.innerHTML = nextHtml;
+    }
+  }
+
+  function requestTasksRefresh() {
+    if (document.visibilityState === 'hidden') return;
+
+    const tasksContainer = document.querySelector('[data-openspec-artifact-file]#tasks-content');
+    if (!tasksContainer) return;
+
+    const filepath = tasksContainer.getAttribute('data-openspec-artifact-file');
+    if (!filepath) return;
+
+    vscode.postMessage({
+      type: 'loadFileContent',
+      filepath
+    });
+  }
+
+  function updateOpenCodeDotFromStatus(message) {
+    const dot = document.querySelector('.opencode-dot');
+    if (!dot) return;
+
+    const isListening = !!message.isListening;
+    dot.classList.toggle('is-started', isListening);
+    dot.classList.toggle('is-stopped', !isListening);
+
+    const tooltip = isListening ? 'OpenCode started' : 'OpenCode not started';
+    dot.setAttribute('data-opencode-status', isListening ? 'started' : 'stopped');
+    dot.setAttribute('title', tooltip);
+    dot.setAttribute('aria-label', tooltip);
+
+    const startButton = document.querySelector('[data-opencode-start]');
+    if (startButton) {
+      startButton.textContent = isListening ? 'OpenCode Running' : 'Start OpenCode';
+      startButton.disabled = isListening;
+      startButton.setAttribute('aria-disabled', isListening ? 'true' : 'false');
+      const startTooltip = isListening
+        ? 'OpenCode already started'
+        : 'Start OpenCode server on port 4099';
+      startButton.setAttribute('title', startTooltip);
+      startButton.setAttribute('aria-label', startTooltip);
+    }
+  }
+
+  function requestOpenCodeStatus() {
+    vscode.postMessage({
+      type: 'opencodeStatusRequest'
+    });
+  }
 
   // Smooth scroll for anchor links
   document.addEventListener('click', function(event) {
@@ -255,5 +376,13 @@
 
   // Initialize VS Code API
   const vscode = acquireVsCodeApi();
+
+  // Periodically refresh OpenCode listening state
+  requestOpenCodeStatus();
+  setInterval(requestOpenCodeStatus, OPENCODE_STATUS_POLL_MS);
+
+  // Periodically refresh tasks content so the webview reflects runner progress
+  requestTasksRefresh();
+  setInterval(requestTasksRefresh, OPENSPEC_TASKS_POLL_MS);
 
 })();

@@ -20,7 +20,7 @@ export class OpenSpecWebviewProvider implements vscode.WebviewPanelSerializer {
     });
   }
 
-  async deserializeWebviewPanel(_webviewPanel: vscode.WebviewPanel, _state: any) {
+  async deserializeWebviewPanel(_webviewPanel: vscode.WebviewPanel, _state: unknown) {
     console.log('Deserializing webview panel');
     // Handle panel restoration if needed
   }
@@ -71,8 +71,42 @@ export class OpenSpecWebviewProvider implements vscode.WebviewPanelSerializer {
     const stylesUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'styles.css'));
     const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'script.js'));
 
-    const { proposalContent, tasksContent, specsList, summaryHtml } = await this.buildChangeContent(item);
+    const { proposalContent, designContent, tasksContent, specsList, summaryHtml } = await this.buildChangeContent(item);
 
+    const escapeAttr = (value: string): string => {
+      return value.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    };
+
+    const proposalFilePath = item.type === 'change' && item.path ? path.join(item.path, 'proposal.md') : '';
+    const designFilePath = item.type === 'change' && item.path ? path.join(item.path, 'design.md') : '';
+    const tasksFilePath = item.type === 'change' && item.path ? path.join(item.path, 'tasks.md') : '';
+
+    const renderArtifactActions = (filePath: string, label: string): string => {
+      if (!filePath) {
+        return '';
+      }
+      return `
+        <div class="artifact-actions">
+          <button type="button" class="artifact-open" data-open-file="${escapeAttr(filePath)}" aria-label="Open ${label}">
+            Open ${label}
+          </button>
+        </div>
+      `;
+    };
+
+    const isEmptyChange = item.type === 'change'
+      && typeof item.path === 'string'
+      && !(await WorkspaceUtils.hasAnyChangeArtifacts(item.path));
+
+    const emptyStateHtml = isEmptyChange ? this.renderEmptyStatePanel() : '';
+    const isOpenCodeListening = await WorkspaceUtils.isOpenCodeServerListening();
+    const openCodeDotClass = isOpenCodeListening ? 'opencode-dot is-started' : 'opencode-dot is-stopped';
+    const openCodeDotTooltip = isOpenCodeListening ? 'OpenCode started' : 'OpenCode not started';
+    const openCodeStartLabel = isOpenCodeListening ? 'OpenCode Running' : 'Start OpenCode';
+    const openCodeStartTooltip = isOpenCodeListening
+      ? 'OpenCode already started'
+      : 'Start OpenCode server on port 4099';
+ 
     return `
       <!DOCTYPE html>
       <html lang="en">
@@ -84,39 +118,80 @@ export class OpenSpecWebviewProvider implements vscode.WebviewPanelSerializer {
           <link href="${stylesUri}" rel="stylesheet">
       </head>
       <body>
-          <div class="container">
-              <header class="header">
-                  <div class="header-title">
-                    <h1>${item.label}</h1>
-                    ${this.renderStatusBadge(item)}
-                  </div>
-                  ${summaryHtml}
-              </header>
+           <div class="container">
+               <header class="header">
+                   <div class="header-title">
+                    <div class="header-title-left">
+                      <h1>${item.label}</h1>
+                      ${this.renderStatusBadge(item)}
+                    </div>
+                     <div class="header-controls">
+                       <button
+                         type="button"
+                         class="${openCodeDotClass}"
+                         title="${openCodeDotTooltip}"
+                         aria-label="${openCodeDotTooltip}"
+                         data-opencode-status="${isOpenCodeListening ? 'started' : 'stopped'}"
+                       ></button>
+                       <button
+                         type="button"
+                         class="opencode-start"
+                         data-opencode-start
+                         ${isOpenCodeListening ? 'disabled aria-disabled="true"' : ''}
+                         title="${openCodeStartTooltip}"
+                         aria-label="${openCodeStartTooltip}"
+                       >${openCodeStartLabel}</button>
+                     </div>
+                    </div>
+                    ${summaryHtml}
+                </header>
 
               <div class="content">
-                  ${proposalContent ? `
-                      <div class="collapsible-section" data-section="proposal">
-                          <button class="section-header" tabindex="0" aria-expanded="true" aria-controls="proposal-content">
-                              <span class="section-title">Proposal</span>
-                              <span class="collapse-icon">▼</span>
-                          </button>
-                          <div id="proposal-content" class="section-content markdown-content">
-                              ${proposalContent}
-                          </div>
-                      </div>
-                  ` : ''}
+                    ${emptyStateHtml}
+                    ${proposalContent ? `
+                         <div class="collapsible-section" data-section="proposal">
+                             <button class="section-header" tabindex="0" aria-expanded="true" aria-controls="proposal-content">
+                                 <span class="section-title">Proposal</span>
+                                 <span class="collapse-icon">▼</span>
+                             </button>
+                             <div id="proposal-content" class="section-content markdown-content">
+                                 ${renderArtifactActions(proposalFilePath, 'proposal.md')}
+                                 ${proposalContent}
+                             </div>
+                         </div>
+                     ` : ''}
 
-                  ${tasksContent ? `
-                      <div class="collapsible-section" data-section="tasks">
-                          <button class="section-header" tabindex="0" aria-expanded="true" aria-controls="tasks-content">
-                              <span class="section-title">Tasks</span>
-                              <span class="collapse-icon">▼</span>
-                          </button>
-                          <div id="tasks-content" class="section-content markdown-content">
-                              ${tasksContent}
-                          </div>
-                      </div>
-                  ` : ''}
+                    ${designContent ? `
+                        <div class="collapsible-section" data-section="design">
+                            <button class="section-header" tabindex="0" aria-expanded="true" aria-controls="design-content">
+                                <span class="section-title">Design</span>
+                                <span class="collapse-icon">▼</span>
+                            </button>
+                            <div id="design-content" class="section-content markdown-content">
+                                ${renderArtifactActions(designFilePath, 'design.md')}
+                                ${designContent}
+                            </div>
+                        </div>
+                    ` : ''}
+
+                    ${tasksContent ? `
+                        <div class="collapsible-section" data-section="tasks">
+                            <button class="section-header" tabindex="0" aria-expanded="true" aria-controls="tasks-content">
+                                <span class="section-title">Tasks</span>
+                                <span class="collapse-icon">▼</span>
+                            </button>
+                            <div
+                              id="tasks-content"
+                              class="section-content markdown-content"
+                              data-openspec-artifact-file="${escapeAttr(tasksFilePath)}"
+                            >
+                                ${renderArtifactActions(tasksFilePath, 'tasks.md')}
+                                <div data-openspec-artifact-body>
+                                  ${tasksContent}
+                                </div>
+                            </div>
+                        </div>
+                    ` : ''}
 
                   ${specsList ? `
                       <div class="collapsible-section" data-section="specs">
@@ -130,12 +205,30 @@ export class OpenSpecWebviewProvider implements vscode.WebviewPanelSerializer {
                       </div>
                   ` : ''}
 
-                  ${await this.renderFilesList(item)}
-              </div>
-          </div>
-          <script src="${scriptUri}"></script>
-      </body>
-      </html>
+                   ${await this.renderFilesList(item)}
+               </div>
+           </div>
+           <script src="${scriptUri}"></script>
+       </body>
+       </html>
+    `;
+  }
+
+  private renderEmptyStatePanel(): string {
+    return `
+      <section class="empty-state" aria-label="Empty change">
+        <h2 class="empty-state-title">No artifacts yet</h2>
+        <p class="empty-state-body">This change has no proposal, design, tasks, or specs. Add an artifact to get started.</p>
+        <div class="empty-state-actions">
+          <button
+            type="button"
+            class="cta-button"
+            data-opencode-attach="http://localhost:4099"
+            aria-label="Attach to OpenCode at http://localhost:4099"
+          >Attach to OpenCode</button>
+          <p class="empty-state-hint">Runs the bundled Ralph runner (no workspace files created)</p>
+        </div>
+      </section>
     `;
   }
 
@@ -148,7 +241,7 @@ export class OpenSpecWebviewProvider implements vscode.WebviewPanelSerializer {
 
     try {
       const files = (await WorkspaceUtils.listFiles(item.path, ''))
-        .filter(fileName => fileName !== 'proposal.md' && fileName !== 'tasks.md');
+        .filter(fileName => fileName !== 'proposal.md' && fileName !== 'design.md' && fileName !== 'tasks.md');
       if (files.length === 0) {
         return '';
       }
@@ -203,17 +296,19 @@ export class OpenSpecWebviewProvider implements vscode.WebviewPanelSerializer {
 
   private async buildChangeContent(item: TreeItemData): Promise<{
     proposalContent: string;
+    designContent: string;
     tasksContent: string;
     specsList: string;
     summaryHtml: string;
   }> {
     let proposalContent = '';
+    let designContent = '';
     let tasksContent = '';
     let specsList = '';
     let summaryHtml = '';
 
     if (item.type !== 'change' || !item.path) {
-      return { proposalContent, tasksContent, specsList, summaryHtml };
+      return { proposalContent, designContent, tasksContent, specsList, summaryHtml };
     }
 
     try {
@@ -227,6 +322,16 @@ export class OpenSpecWebviewProvider implements vscode.WebviewPanelSerializer {
     }
 
     try {
+      const designPath = path.join(item.path, 'design.md');
+      if (await WorkspaceUtils.fileExists(designPath)) {
+        const designMarkdown = await WorkspaceUtils.readFile(designPath);
+        designContent = marked(designMarkdown);
+      }
+    } catch (error) {
+      console.error('Error reading design file:', error);
+    }
+
+    try {
       const tasksPath = path.join(item.path, 'tasks.md');
       if (await WorkspaceUtils.fileExists(tasksPath)) {
         const tasksMarkdown = await WorkspaceUtils.readFile(tasksPath);
@@ -237,23 +342,30 @@ export class OpenSpecWebviewProvider implements vscode.WebviewPanelSerializer {
     }
 
     try {
-      const specsDir = path.join(item.path, 'specs');
-      if (await WorkspaceUtils.fileExists(specsDir)) {
-        const capabilityDirs = await WorkspaceUtils.listDirectories(specsDir);
-        if (capabilityDirs.length > 0) {
-          const specLinks: string[] = [];
-          for (const capability of capabilityDirs) {
-            const specPath = path.join(specsDir, capability, 'spec.md');
-            if (await WorkspaceUtils.fileExists(specPath)) {
-              const escapedPath = specPath.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-              specLinks.push(`<button class="spec-link" data-filepath="${escapedPath}" aria-label="Open ${capability} spec">
-                <span class="codicon codicon-file-text"></span>
-                ${capability} spec
-              </button>`);
-            }
+      // Specs are scoped to the selected change:
+      // `openspec/changes/<change>/specs/*/spec.md` (or archived change path).
+      // Prefer `item.path/specs`, but fall back to `item.path/<change>/specs` if needed.
+      const directSpecsDir = path.join(item.path, 'specs');
+      const nestedSpecsDir = path.join(item.path, item.label, 'specs');
+
+      const specsDir = (await WorkspaceUtils.fileExists(directSpecsDir))
+        ? directSpecsDir
+        : ((await WorkspaceUtils.fileExists(nestedSpecsDir)) ? nestedSpecsDir : directSpecsDir);
+
+      const capabilityDirs = await WorkspaceUtils.listDirectories(specsDir);
+      if (capabilityDirs.length > 0) {
+        const specLinks: string[] = [];
+        for (const capability of capabilityDirs) {
+          const specPath = path.join(specsDir, capability, 'spec.md');
+          if (await WorkspaceUtils.fileExists(specPath)) {
+            const escapedPath = specPath.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+            specLinks.push(`<button class="spec-link" data-filepath="${escapedPath}" aria-label="Open ${capability} spec">
+              <span class="codicon codicon-file-text"></span>
+              ${capability} spec
+            </button>`);
           }
-          specsList = specLinks.join('');
         }
+        specsList = specLinks.join('');
       }
     } catch (error) {
       console.error('Error building specs list:', error);
@@ -261,11 +373,13 @@ export class OpenSpecWebviewProvider implements vscode.WebviewPanelSerializer {
 
     // Summary section removed as requested
     
-    return { proposalContent, tasksContent, specsList, summaryHtml };
+    return { proposalContent, designContent, tasksContent, specsList, summaryHtml };
   }
 
-  private async buildSummary(changePath: string): Promise<string> {
-    const openspecRoot = this.findOpenSpecRoot(changePath);
+  private async buildSummary(_changePath: string): Promise<string> {
+    // Always scope to the workspace-root ./openspec folder.
+    // Do not infer an OpenSpec root from arbitrary/nested paths.
+    const openspecRoot = this.getWorkspaceOpenSpecRoot();
     if (!openspecRoot) {
       return '';
     }
@@ -296,13 +410,12 @@ export class OpenSpecWebviewProvider implements vscode.WebviewPanelSerializer {
     `;
   }
 
-  private findOpenSpecRoot(changePath: string): string | null {
-    const parts = changePath.split(path.sep);
-    const openspecIndex = parts.lastIndexOf('openspec');
-    if (openspecIndex === -1) {
+  private getWorkspaceOpenSpecRoot(): string | null {
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+    if (!workspaceFolder) {
       return null;
     }
-    return parts.slice(0, openspecIndex + 1).join(path.sep);
+    return WorkspaceUtils.getOpenSpecRoot(workspaceFolder);
   }
 
   private setupWebviewMessageHandling(panel: vscode.WebviewPanel, _item: TreeItemData, _panelKey: string): void {
@@ -311,7 +424,37 @@ export class OpenSpecWebviewProvider implements vscode.WebviewPanelSerializer {
         const fileUri = message.filepath
           ? vscode.Uri.file(message.filepath)
           : vscode.Uri.parse(message.uri);
-        await vscode.commands.executeCommand('vscode.open', fileUri);
+        const preview = typeof message.preview === 'boolean' ? message.preview : true;
+        await vscode.commands.executeCommand('vscode.open', fileUri, { preview });
+      } else if (message.type === 'opencodeAttachClicked') {
+        const url = typeof message.url === 'string' ? message.url : 'http://localhost:4099';
+        // Task 4.3: generate runner + run it attached in a terminal
+        await vscode.commands.executeCommand('openspec.opencode.runRunnerAttached', url);
+      } else if (message.type === 'opencodeDotClicked') {
+        // Task 2.2: UI-only control. Backend command wiring is handled in task 2.3.
+        const status = typeof message.status === 'string' ? message.status : undefined;
+        if (status === 'started') {
+          return;
+        }
+ 
+        vscode.commands.executeCommand('openspec.opencode.startServer');
+      } else if (message.type === 'opencodeStartClicked') {
+        // Explicit button (in addition to the dot) to start `opencode serve --port 4099`.
+        vscode.commands.executeCommand('openspec.opencode.startServer');
+      } else if (message.type === 'opencodeStatusRequest') {
+        try {
+          const isListening = await WorkspaceUtils.isOpenCodeServerListening();
+          panel.webview.postMessage({
+            type: 'opencodeStatusResponse',
+            isListening
+          });
+        } catch (error) {
+          panel.webview.postMessage({
+            type: 'opencodeStatusResponse',
+            isListening: false,
+            error: error instanceof Error ? error.message : 'Unknown error'
+          });
+        }
       } else if (message.type === 'loadFileContent') {
         try {
           const fileUri = vscode.Uri.file(message.filepath);

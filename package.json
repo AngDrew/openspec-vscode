@@ -2,7 +2,7 @@
   "name": "openspec-vscode",
   "displayName": "OpenSpec VSCode",
   "description": "VS Code extension for OpenSpec spec-driven development workflow",
-  "version": "0.0.5",
+  "version": "1.0.0",
   "publisher": "AngDrew",
   "engines": {
     "vscode": "^1.74.0"
@@ -61,9 +61,29 @@
         "command": "openspec.archiveChange",
         "title": "Archive Change",
         "icon": "$(archive)"
+      },
+      {
+        "command": "openspec.opencode.startServer",
+        "title": "OpenSpec: Start OpenCode Server",
+        "icon": "$(debug-start)"
+      },
+      {
+        "command": "openspec.opencode.generateRunnerScript",
+        "title": "OpenSpec: Generate Runner Script"
+      },
+      {
+        "command": "openspec.opencode.runRunnerAttached",
+        "title": "OpenSpec: Run Runner Attached"
       }
     ],
     "menus": {
+      "view/title": [
+        {
+          "command": "openspec.opencode.startServer",
+          "when": "view == openspecExplorer && openspec:initialized",
+          "group": "navigation@1"
+        }
+      ],
       "view/item/context": [
         {
           "command": "openspec.applyChange",
