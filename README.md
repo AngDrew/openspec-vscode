@@ -96,6 +96,12 @@ If you want to run it manually:
 node ralph_opencode.mjs --attach http://localhost:4099 --change your-change-id
 ```
 
+Optionally, pass `--count <n>` to run up to `n` tasks in a single invocation (default: `1`):
+
+```bash
+node ralph_opencode.mjs --attach http://localhost:4099 --change your-change-id --count 3
+```
+
 #### Fast-forward scaffold-only changes
 
 If a change folder contains only `.openspec.yaml` (and optionally an empty `specs/`), the explorer shows a **Fast-Forward Change** action. It runs a prompt like:

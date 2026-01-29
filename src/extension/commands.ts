@@ -72,6 +72,34 @@ export function registerCommands(context: vscode.ExtensionContext, runtime: Exte
     }
 
     try {
+      const tasksPerRun = await vscode.window.showInputBox({
+        title: 'OpenSpec: Apply Change',
+        prompt: 'Tasks to run for this invocation',
+        value: '1',
+        placeHolder: '1',
+        validateInput: (value) => {
+          const trimmed = value.trim();
+          if (!trimmed) {
+            return 'Enter an integer >= 1';
+          }
+          if (!/^\d+$/.test(trimmed)) {
+            return 'Enter an integer >= 1';
+          }
+          const n = Number(trimmed);
+          if (!Number.isSafeInteger(n) || n < 1) {
+            return 'Enter an integer >= 1';
+          }
+          return null;
+        }
+      });
+
+      // User cancelled (ESC) or dismissed the input.
+      if (!tasksPerRun) {
+        return;
+      }
+
+      const count = Number(tasksPerRun.trim());
+
       const ready = await ensureLocalOpenCodeServerReady();
       if (!ready) {
         vscode.window.showErrorMessage(
@@ -84,7 +112,8 @@ export function registerCommands(context: vscode.ExtensionContext, runtime: Exte
       // This mirrors the spec behavior (task loop parity) using the cross-platform script.
       await vscode.commands.executeCommand(Commands.opencodeRunRunnerAttached, {
         url: 'http://localhost:4099',
-        changeId: item.label
+        changeId: item.label,
+        count
       });
     } catch (error) {
       vscode.window.showErrorMessage(
@@ -284,17 +313,32 @@ export function registerCommands(context: vscode.ExtensionContext, runtime: Exte
 
       let url = 'http://localhost:4099';
       let changeId = '';
+      let count: number | undefined;
       if (typeof attachUrl === 'string' && attachUrl.trim().length > 0) {
         url = attachUrl.trim();
       } else if (attachUrl && typeof attachUrl === 'object') {
         const payload = attachUrl as Record<string, unknown>;
         const maybeUrl = payload.url;
         const maybeChangeId = payload.changeId;
+        const maybeCount = payload.count;
         if (typeof maybeUrl === 'string' && maybeUrl.trim().length > 0) {
           url = maybeUrl.trim();
         }
         if (typeof maybeChangeId === 'string' && maybeChangeId.trim().length > 0) {
           changeId = maybeChangeId.trim();
+        }
+
+        if (typeof maybeCount === 'number') {
+          count = maybeCount;
+        } else if (typeof maybeCount === 'string') {
+          const trimmed = maybeCount.trim();
+          if (/^\d+$/.test(trimmed)) {
+            count = Number(trimmed);
+          }
+        }
+
+        if (count !== undefined && (!Number.isSafeInteger(count) || count < 1)) {
+          count = undefined;
         }
       }
 
@@ -332,6 +376,9 @@ export function registerCommands(context: vscode.ExtensionContext, runtime: Exte
         const args: string[] = [runnerUri.fsPath, '--attach', url];
         if (changeId) {
           args.push('--change', changeId);
+        }
+        if (count !== undefined) {
+          args.push('--count', String(count));
         }
 
         // Provide a sane default for environments where `opencode` isn't on PATH.

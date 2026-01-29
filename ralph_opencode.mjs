@@ -12,9 +12,10 @@ function die(message, code = 1) {
 
 function printHelp() {
   process.stdout.write(
-    `Usage: ralph_opencode.mjs [--attach URL] [--change CHANGE]\n\nOptions:\n` +
+    `Usage: ralph_opencode.mjs [--attach URL] [--change CHANGE] [--count N]\n\nOptions:\n` +
     `  --attach URL     Attach to an opencode server (e.g. http://localhost:4096)\n` +
-    `  --change CHANGE  Target change id under openspec/changes/<change>\n\nEnv:\n` +
+    `  --change CHANGE  Target change id under openspec/changes/<change>\n` +
+    `  --count N        Run up to N tasks in this invocation (default: 1)\n\nEnv:\n` +
     `  OPENCODE_ATTACH_URL  Same as --attach\n` +
     `  OPENSPEC_CHANGE      Same as --change\n` +
     `  OPENCODE_NPX_PKG     Fallback npx package (default: opencode-ai@1.1.40)\n`
@@ -100,7 +101,21 @@ function parseArgs(argv) {
   const out = {
     attachUrl: process.env.OPENCODE_ATTACH_URL || process.env.ATTACH_URL || '',
     changeName: process.env.OPENSPEC_CHANGE || '',
+    count: 1,
   };
+
+  function parseCountValue(raw) {
+    const s = String(raw ?? '').trim();
+    // Require a strict base-10 integer (no decimals, no exponent, no sign).
+    if (!/^[0-9]+$/.test(s)) {
+      die('ERROR: --count must be an integer >= 1', 64);
+    }
+    const n = Number.parseInt(s, 10);
+    if (!Number.isFinite(n) || n < 1) {
+      die('ERROR: --count must be an integer >= 1', 64);
+    }
+    return n;
+  }
 
   const args = [...argv];
   while (args.length > 0) {
@@ -128,6 +143,19 @@ function parseArgs(argv) {
     }
     if (a.startsWith('--change=')) {
       out.changeName = a.slice('--change='.length);
+      args.splice(0, 1);
+      continue;
+    }
+    if (a === '--count') {
+      if (args.length < 2 || !args[1]) {
+        die('ERROR: --count requires an integer argument', 64);
+      }
+      out.count = parseCountValue(args[1]);
+      args.splice(0, 2);
+      continue;
+    }
+    if (a.startsWith('--count=')) {
+      out.count = parseCountValue(a.slice('--count='.length));
       args.splice(0, 1);
       continue;
     }
@@ -205,7 +233,7 @@ function extractTaskBlock(tasksText, tid) {
   return out;
 }
 
-const { attachUrl, changeName: changeNameArg } = parseArgs(process.argv.slice(2));
+const { attachUrl, changeName: changeNameArg, count: tasksPerRun } = parseArgs(process.argv.slice(2));
 const maxIters = Number.parseInt(process.env.MAX_ITERS || '30', 10);
 const maxItersSafe = Number.isFinite(maxIters) && maxIters > 0 ? maxIters : 30;
 
@@ -233,12 +261,19 @@ if (!fs.existsSync(tasksFile)) {
 process.stdout.write(`Change     : ${changeName}\n`);
 process.stdout.write(`Tasks file : ${tasksFile}\n`);
 process.stdout.write(`Max iters  : ${maxItersSafe}\n`);
+process.stdout.write(`Tasks/run  : ${tasksPerRun}\n`);
 if (attachUrl) {
   process.stdout.write(`Attach     : ${attachUrl}\n`);
 }
 process.stdout.write('\n');
 
+let completedThisRun = 0;
 for (let iter = 1; iter <= maxItersSafe; iter++) {
+  if (completedThisRun >= tasksPerRun) {
+    process.stdout.write(`Reached tasks-per-run limit (${tasksPerRun}). Stopping early (iteration ${iter}).\n`);
+    process.exit(0);
+  }
+
   const tasksTextBefore = fs.readFileSync(tasksFile, 'utf8');
   if (allDone(tasksTextBefore)) {
     process.stdout.write(`All tasks completed. Stopping early (iteration ${iter}).\n`);
@@ -296,6 +331,7 @@ for (let iter = 1; iter <= maxItersSafe; iter++) {
     die(`Task ${tid} was NOT marked done in ${tasksFile} after iteration ${iter}.\nRefusing to continue to avoid looping blindly.`, 3);
   }
 
+  completedThisRun += 1;
   process.stdout.write(`Task ${tid} completed.\n\n`);
 }
 
