@@ -1,0 +1,2 @@
+# Ensure shell scripts use LF line endings (prevents /usr/bin/env: 'bash\r' errors)
+*.sh text eol=lf
