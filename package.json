@@ -68,6 +68,11 @@
         "icon": "$(debug-start)"
       },
       {
+        "command": "openspec.opencode.openUi",
+        "title": "OpenSpec: Open OpenCode UI",
+        "icon": "$(link-external)"
+      },
+      {
         "command": "openspec.opencode.generateRunnerScript",
         "title": "OpenSpec: Generate Runner Script"
       },
@@ -82,6 +87,11 @@
           "command": "openspec.opencode.startServer",
           "when": "view == openspecExplorer && openspec:initialized",
           "group": "navigation@1"
+        },
+        {
+          "command": "openspec.opencode.openUi",
+          "when": "view == openspecExplorer && openspec:initialized",
+          "group": "navigation@2"
         }
       ],
       "view/item/context": [

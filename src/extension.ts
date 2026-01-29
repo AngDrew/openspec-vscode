@@ -160,6 +160,18 @@ function registerCommands(context: vscode.ExtensionContext) {
     }
   });
 
+  // Open OpenCode UI (http://localhost:4099) in default browser
+  const openOpenCodeUiCommand = vscode.commands.registerCommand('openspec.opencode.openUi', async () => {
+    try {
+      const url = vscode.Uri.parse('http://localhost:4099');
+      await vscode.env.openExternal(url);
+    } catch (error) {
+      vscode.window.showErrorMessage(
+        `Failed to open OpenCode UI: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
+    }
+  });
+
   // Runner script is bundled with the extension (no workspace writes)
   const generateRunnerScriptCommand = vscode.commands.registerCommand('openspec.opencode.generateRunnerScript', async () => {
     const sourceUri = vscode.Uri.joinPath(context.extensionUri, 'ralph_opencode.mjs');
@@ -309,6 +321,7 @@ function registerCommands(context: vscode.ExtensionContext) {
     applyChangeCommand,
     archiveChangeCommand,
     startOpenCodeServerCommand,
+    openOpenCodeUiCommand,
     generateRunnerScriptCommand,
     runRunnerAttachedCommand,
     generateProposalCommand,
