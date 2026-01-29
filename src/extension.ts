@@ -159,12 +159,20 @@ function registerCommands(context: vscode.ExtensionContext) {
     }
 
     try {
+      const ready = await ensureLocalOpenCodeServerReady();
+      if (!ready) {
+        vscode.window.showErrorMessage(
+          'OpenCode server is not responding on port 4099. It may still be starting; check the "OpenCode Server" terminal.'
+        );
+        return;
+      }
+
       const terminalName = `OpenSpec FF: ${changeId}`;
       const terminal = vscode.window.createTerminal({ name: terminalName });
       terminal.show(true);
 
       const prompt = `use openspec ff skill to populate ${changeId}`;
-      terminal.sendText(`opencode --continue --prompt ${JSON.stringify(prompt)}`, true);
+      terminal.sendText(`opencode run --attach localhost:4099 --continue ${JSON.stringify(prompt)}`, true);
     } catch (error) {
       vscode.window.showErrorMessage(
         `Failed to start fast-forward flow: ${error instanceof Error ? error.message : 'Unknown error'}`
