@@ -167,15 +167,17 @@ export class OpenSpecExplorerProvider implements vscode.TreeDataProvider<TreeIte
       if (changeName === 'archive') continue; // Skip archive directory
 
       const changePath = path.join(changesDir, changeName);
+      const isScaffoldOnly = await WorkspaceUtils.isScaffoldOnlyActiveChange(changePath);
 
       items.push({
         id: `change-${changeName}`,
         label: changeName,
         type: 'change',
         path: changePath,
-        contextValue: 'change:active',
+        contextValue: isScaffoldOnly ? 'change:active:scaffold' : 'change:active',
         metadata: {
           isActive: true,
+          isScaffoldOnly,
           status: 'in-progress'
         }
       });

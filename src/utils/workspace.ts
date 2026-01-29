@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs/promises';
+import * as net from 'net';
 import { CacheManager } from './cache';
 import { ErrorHandler } from './errorHandler';
 
@@ -40,6 +41,119 @@ export class WorkspaceUtils {
 
   static getArchiveDir(workspaceFolder: vscode.WorkspaceFolder): string {
     return path.join(this.getChangesDir(workspaceFolder), 'archive');
+  }
+
+  static async hasAnyChangeArtifacts(changeDir: string): Promise<boolean> {
+    try {
+      const proposalPath = path.join(changeDir, 'proposal.md');
+      const designPath = path.join(changeDir, 'design.md');
+      const tasksPath = path.join(changeDir, 'tasks.md');
+      const specsDir = path.join(changeDir, 'specs');
+
+      if (await this.fileExists(proposalPath)) return true;
+      if (await this.fileExists(designPath)) return true;
+      if (await this.fileExists(tasksPath)) return true;
+
+      if (await this.fileExists(specsDir)) {
+        const specDirs = await this.listDirectories(specsDir);
+        for (const specName of specDirs) {
+          const specMd = path.join(specsDir, specName, 'spec.md');
+          if (await this.fileExists(specMd)) return true;
+        }
+      }
+
+      return false;
+    } catch (error) {
+      ErrorHandler.debug(`Failed to check artifacts in ${changeDir}: ${error}`);
+      return false;
+    }
+  }
+
+  static async isScaffoldOnlyActiveChange(changeDir: string): Promise<boolean> {
+    // A scaffold-only change contains ONLY `.openspec.yaml` at the change root.
+    // No proposal/design/tasks/specs files exist yet.
+    try {
+      const items = await fs.readdir(changeDir, { withFileTypes: true });
+      let hasOpenSpecYaml = false;
+      let hasOtherEntries = false;
+
+      for (const item of items) {
+        if (item.name === '.DS_Store' && item.isFile()) {
+          continue;
+        }
+        if (item.name === 'Thumbs.db' && item.isFile()) {
+          continue;
+        }
+        if (item.name === '.openspec.yaml' && item.isFile()) {
+          hasOpenSpecYaml = true;
+          continue;
+        }
+
+        // Allow an empty `specs/` directory (optionally containing only `.gitkeep`).
+        if (item.name === 'specs' && item.isDirectory()) {
+          try {
+            const specEntries = await fs.readdir(path.join(changeDir, 'specs'), { withFileTypes: true });
+            const nonIgnorable = specEntries.filter(entry => {
+              if (!entry.isFile()) return true;
+              return entry.name !== '.gitkeep' && entry.name !== '.DS_Store' && entry.name !== 'Thumbs.db';
+            });
+            if (nonIgnorable.length === 0) {
+              continue;
+            }
+          } catch {
+            // If we can't read it, treat it as non-empty to be safe.
+          }
+        }
+
+        hasOtherEntries = true;
+        break;
+      }
+
+      return hasOpenSpecYaml && !hasOtherEntries;
+    } catch (error) {
+      ErrorHandler.debug(`Failed to check scaffold-only change in ${changeDir}: ${error}`);
+      return false;
+    }
+  }
+
+  static async isPortOpen(host: string, port: number, timeoutMs: number = 350): Promise<boolean> {
+    return await new Promise((resolve) => {
+      const socket = new net.Socket();
+
+      const done = (result: boolean) => {
+        try {
+          socket.destroy();
+        } catch {
+          // ignore
+        }
+        resolve(result);
+      };
+
+      socket.setTimeout(timeoutMs);
+
+      socket.once('connect', () => done(true));
+      socket.once('timeout', () => done(false));
+      socket.once('error', () => done(false));
+
+      try {
+        socket.connect(port, host);
+      } catch {
+        done(false);
+      }
+    });
+  }
+
+  static async isOpenCodeServerListening(timeoutMs: number = 350): Promise<boolean> {
+    const port = 4099;
+    const hosts = ['127.0.0.1', '::1', 'localhost'];
+
+    for (const host of hosts) {
+      if (await this.isPortOpen(host, port, timeoutMs)) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   static async fileExists(filePath: string): Promise<boolean> {
