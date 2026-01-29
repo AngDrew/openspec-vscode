@@ -69,6 +69,53 @@ export class WorkspaceUtils {
     }
   }
 
+  static async isScaffoldOnlyActiveChange(changeDir: string): Promise<boolean> {
+    // A scaffold-only change contains ONLY `.openspec.yaml` at the change root.
+    // No proposal/design/tasks/specs files exist yet.
+    try {
+      const items = await fs.readdir(changeDir, { withFileTypes: true });
+      let hasOpenSpecYaml = false;
+      let hasOtherEntries = false;
+
+      for (const item of items) {
+        if (item.name === '.DS_Store' && item.isFile()) {
+          continue;
+        }
+        if (item.name === 'Thumbs.db' && item.isFile()) {
+          continue;
+        }
+        if (item.name === '.openspec.yaml' && item.isFile()) {
+          hasOpenSpecYaml = true;
+          continue;
+        }
+
+        // Allow an empty `specs/` directory (optionally containing only `.gitkeep`).
+        if (item.name === 'specs' && item.isDirectory()) {
+          try {
+            const specEntries = await fs.readdir(path.join(changeDir, 'specs'), { withFileTypes: true });
+            const nonIgnorable = specEntries.filter(entry => {
+              if (!entry.isFile()) return true;
+              return entry.name !== '.gitkeep' && entry.name !== '.DS_Store' && entry.name !== 'Thumbs.db';
+            });
+            if (nonIgnorable.length === 0) {
+              continue;
+            }
+          } catch {
+            // If we can't read it, treat it as non-empty to be safe.
+          }
+        }
+
+        hasOtherEntries = true;
+        break;
+      }
+
+      return hasOpenSpecYaml && !hasOtherEntries;
+    } catch (error) {
+      ErrorHandler.debug(`Failed to check scaffold-only change in ${changeDir}: ${error}`);
+      return false;
+    }
+  }
+
   static async isPortOpen(host: string, port: number, timeoutMs: number = 350): Promise<boolean> {
     return await new Promise((resolve) => {
       const socket = new net.Socket();

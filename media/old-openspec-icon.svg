@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <!-- Background circle -->
+  <circle cx="12" cy="12" r="11" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.2"/>
+  
+  <!-- Document shape (slightly open) -->
+  <path d="M7 4.5h7.5c.83 0 1.5.67 1.5 1.5v10.5c0 .83-.67 1.5-1.5 1.5H7a1.5 1.5 0 0 1-1.5-1.5V6c0-.83.67-1.5 1.5-1.5z" 
+        fill="none" stroke="currentColor" stroke-width="1.5"/>
+  
+  <!-- Document fold -->
+  <path d="M15 4.5V9c0 .55.45 1 1 1h4.5" 
+        fill="none" stroke="currentColor" stroke-width="1.5"/>
+  
+  <!-- Content lines -->
+  <path d="M8 8h8M8 10h8M8 12h6" 
+        stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"/>
+  
+  <!-- Spec marker (small diamond) -->
+  <path d="M18 6l1-1 1 1-1 1-1-1z" 
+        fill="currentColor" opacity="0.6"/>
+</svg>

@@ -31,6 +31,21 @@
       return;
     }
 
+    const ffButton = event.target.closest('[data-openspec-ff-change]');
+    if (ffButton) {
+      event.preventDefault();
+      const changeId = ffButton.getAttribute('data-openspec-ff-change') || '';
+      if (changeId) {
+        ffButton.setAttribute('aria-disabled', 'true');
+        ffButton.disabled = true;
+        vscode.postMessage({
+          type: 'openspecFastForwardClicked',
+          changeId
+        });
+      }
+      return;
+    }
+
     const openCodeDot = event.target.closest('.opencode-dot');
     if (openCodeDot) {
       event.preventDefault();

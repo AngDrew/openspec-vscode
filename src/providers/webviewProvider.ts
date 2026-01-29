@@ -8,6 +8,10 @@ export class OpenSpecWebviewProvider implements vscode.WebviewPanelSerializer {
   private _panels = new Map<string, vscode.WebviewPanel>();
   private _extensionUri: vscode.Uri;
 
+  private escapeAttr(value: string): string {
+    return value.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
   constructor(extensionUri: vscode.Uri) {
     this._extensionUri = extensionUri;
     
@@ -73,9 +77,7 @@ export class OpenSpecWebviewProvider implements vscode.WebviewPanelSerializer {
 
     const { proposalContent, designContent, tasksContent, specsList, summaryHtml } = await this.buildChangeContent(item);
 
-    const escapeAttr = (value: string): string => {
-      return value.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-    };
+    const escapeAttr = (value: string): string => this.escapeAttr(value);
 
     const proposalFilePath = item.type === 'change' && item.path ? path.join(item.path, 'proposal.md') : '';
     const designFilePath = item.type === 'change' && item.path ? path.join(item.path, 'design.md') : '';
@@ -98,7 +100,7 @@ export class OpenSpecWebviewProvider implements vscode.WebviewPanelSerializer {
       && typeof item.path === 'string'
       && !(await WorkspaceUtils.hasAnyChangeArtifacts(item.path));
 
-    const emptyStateHtml = isEmptyChange ? this.renderEmptyStatePanel() : '';
+    const emptyStateHtml = isEmptyChange ? this.renderEmptyStatePanel(item) : '';
     const isOpenCodeListening = await WorkspaceUtils.isOpenCodeServerListening();
     const openCodeDotClass = isOpenCodeListening ? 'opencode-dot is-started' : 'opencode-dot is-stopped';
     const openCodeDotTooltip = isOpenCodeListening ? 'OpenCode started' : 'OpenCode not started';
@@ -214,7 +216,19 @@ export class OpenSpecWebviewProvider implements vscode.WebviewPanelSerializer {
     `;
   }
 
-  private renderEmptyStatePanel(): string {
+  private renderEmptyStatePanel(item: TreeItemData): string {
+    const changeId = item.type === 'change' ? item.label : '';
+    const isActive = item.metadata?.isActive === true;
+    const isScaffoldOnly = item.metadata?.isScaffoldOnly === true;
+    const actionLabel = (isActive && isScaffoldOnly) ? 'Fast-forward artifacts' : 'Attach to OpenCode';
+    const actionTooltip = (isActive && isScaffoldOnly)
+      ? `Fast-forward: populate ${changeId}`
+      : 'Attach to OpenCode at http://localhost:4099';
+    const actionIcon = (isActive && isScaffoldOnly) ? '&gt;&gt;' : '&gt;';
+    const hint = (isActive && isScaffoldOnly)
+      ? `Runs: opencode --prompt "use openspec ff skill to populate ${changeId}"`
+      : 'Runs the bundled Ralph runner (no workspace files created)';
+
     return `
       <section class="empty-state" aria-label="Empty change">
         <h2 class="empty-state-title">No artifacts yet</h2>
@@ -223,10 +237,12 @@ export class OpenSpecWebviewProvider implements vscode.WebviewPanelSerializer {
           <button
             type="button"
             class="cta-button"
-            data-opencode-attach="http://localhost:4099"
-            aria-label="Attach to OpenCode at http://localhost:4099"
-          >Attach to OpenCode</button>
-          <p class="empty-state-hint">Runs the bundled Ralph runner (no workspace files created)</p>
+            ${isActive && isScaffoldOnly
+              ? `data-openspec-ff-change="${this.escapeAttr(changeId)}"`
+              : 'data-opencode-attach="http://localhost:4099"'}
+            aria-label="${this.escapeAttr(actionTooltip)}"
+          >${actionLabel}<span class="cta-icon" aria-hidden="true">${actionIcon}</span></button>
+          <p class="empty-state-hint">${hint}</p>
         </div>
       </section>
     `;
@@ -418,7 +434,7 @@ export class OpenSpecWebviewProvider implements vscode.WebviewPanelSerializer {
     return WorkspaceUtils.getOpenSpecRoot(workspaceFolder);
   }
 
-  private setupWebviewMessageHandling(panel: vscode.WebviewPanel, _item: TreeItemData, _panelKey: string): void {
+  private setupWebviewMessageHandling(panel: vscode.WebviewPanel, item: TreeItemData, _panelKey: string): void {
     panel.webview.onDidReceiveMessage(async (message) => {
       if (message.type === 'openFile') {
         const fileUri = message.filepath
@@ -430,6 +446,20 @@ export class OpenSpecWebviewProvider implements vscode.WebviewPanelSerializer {
         const url = typeof message.url === 'string' ? message.url : 'http://localhost:4099';
         // Task 4.3: generate runner + run it attached in a terminal
         await vscode.commands.executeCommand('openspec.opencode.runRunnerAttached', url);
+      } else if (message.type === 'openspecFastForwardClicked') {
+        const changeId = typeof message.changeId === 'string' ? message.changeId : '';
+        if (!changeId || item.type !== 'change' || item.label !== changeId) {
+          return;
+        }
+        // Delegate to the explorer command implementation so the same safeguards apply.
+        await vscode.commands.executeCommand('openspec.ffChange', item);
+
+        // Best-effort refresh so the empty state/button updates as artifacts appear.
+        try {
+          panel.webview.html = await this.getHtmlContent(panel.webview, item);
+        } catch {
+          // ignore
+        }
       } else if (message.type === 'opencodeDotClicked') {
         // Task 2.2: UI-only control. Backend command wiring is handled in task 2.3.
         const status = typeof message.status === 'string' ? message.status : undefined;

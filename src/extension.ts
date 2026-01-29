@@ -43,6 +43,18 @@ export function activate(context: vscode.ExtensionContext) {
   // Register commands
   registerCommands(context);
 
+  // Keep terminal refs accurate when users close terminals.
+  context.subscriptions.push(
+    vscode.window.onDidCloseTerminal((terminal) => {
+      if (openCodeServerTerminal && terminal === openCodeServerTerminal) {
+        openCodeServerTerminal = undefined;
+      }
+      if (openCodeRunnerTerminal && terminal === openCodeRunnerTerminal) {
+        openCodeRunnerTerminal = undefined;
+      }
+    })
+  );
+
   // Set up file system watcher
   setupFileWatcher(context);
 
@@ -86,6 +98,40 @@ function registerCommands(context: vscode.ExtensionContext) {
     } catch (error) {
       vscode.window.showErrorMessage(
         `Failed to start Ralph runner: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
+    }
+  });
+
+  // Fast-forward scaffold-only change (create artifacts)
+  const fastForwardChangeCommand = vscode.commands.registerCommand('openspec.ffChange', async (item) => {
+    if (!item || !item.label || typeof item.path !== 'string') {
+      vscode.window.showWarningMessage('No change selected');
+      return;
+    }
+
+    const changeId = item.label;
+    const isActive = item?.metadata?.isActive === true;
+    if (!isActive) {
+      vscode.window.showWarningMessage('Fast-forward only applies to active changes');
+      return;
+    }
+
+    const isScaffoldOnly = await WorkspaceUtils.isScaffoldOnlyActiveChange(item.path);
+    if (!isScaffoldOnly) {
+      vscode.window.showWarningMessage('Fast-forward is only available when the change contains only .openspec.yaml');
+      return;
+    }
+
+    try {
+      const terminalName = `OpenSpec FF: ${changeId}`;
+      const terminal = vscode.window.createTerminal({ name: terminalName });
+      terminal.show(true);
+
+      const prompt = `use openspec ff skill to populate ${changeId}`;
+      terminal.sendText(`opencode --prompt ${JSON.stringify(prompt)}`, true);
+    } catch (error) {
+      vscode.window.showErrorMessage(
+        `Failed to start fast-forward flow: ${error instanceof Error ? error.message : 'Unknown error'}`
       );
     }
   });
@@ -143,16 +189,26 @@ function registerCommands(context: vscode.ExtensionContext) {
     try {
       const alreadyListening = await WorkspaceUtils.isOpenCodeServerListening();
       if (alreadyListening) {
+        // If we have (or can find) the terminal, reveal it for convenience.
+        const existing = vscode.window.terminals.find(t => t.name === 'OpenCode Server');
+        existing?.show(true);
         vscode.window.showInformationMessage('OpenCode server already running on port 4099');
         return;
       }
 
+      // Reuse an existing terminal if it still exists; otherwise create a new one.
+      if (openCodeServerTerminal && !vscode.window.terminals.includes(openCodeServerTerminal)) {
+        openCodeServerTerminal = undefined;
+      }
+
       if (!openCodeServerTerminal) {
-        openCodeServerTerminal = vscode.window.createTerminal({ name: 'OpenCode Server' });
+        openCodeServerTerminal = vscode.window.terminals.find(t => t.name === 'OpenCode Server')
+          ?? vscode.window.createTerminal({ name: 'OpenCode Server' });
       }
 
       openCodeServerTerminal.show(true);
-      openCodeServerTerminal.sendText('opencode serve --port 4099', true);
+      // `--print-logs` makes failures visible in the terminal.
+      openCodeServerTerminal.sendText('opencode serve --port 4099 --print-logs', true);
     } catch (error) {
       vscode.window.showErrorMessage(
         `Failed to start OpenCode server: ${error instanceof Error ? error.message : 'Unknown error'}`
@@ -168,6 +224,25 @@ function registerCommands(context: vscode.ExtensionContext) {
     } catch (error) {
       vscode.window.showErrorMessage(
         `Failed to open OpenCode UI: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
+    }
+  });
+
+  // OpenCode: load "openspec new change" skill prompt
+  const newChangeCommand = vscode.commands.registerCommand('openspec.opencode.newChange', async () => {
+    try {
+      const prompt = 'load openspec new change skill';
+
+      const terminalName = 'OpenSpec New Change';
+      const terminal = vscode.window.createTerminal({ name: terminalName });
+      terminal.show(true);
+      terminal.sendText(
+        `opencode --agent plan --prompt ${JSON.stringify(prompt)}`,
+        true
+      );
+    } catch (error) {
+      vscode.window.showErrorMessage(
+        `Failed to start new change flow: ${error instanceof Error ? error.message : 'Unknown error'}`
       );
     }
   });
@@ -319,9 +394,11 @@ function registerCommands(context: vscode.ExtensionContext) {
     viewDetailsCommand,
     listChangesCommand,
     applyChangeCommand,
+    fastForwardChangeCommand,
     archiveChangeCommand,
     startOpenCodeServerCommand,
     openOpenCodeUiCommand,
+    newChangeCommand,
     generateRunnerScriptCommand,
     runRunnerAttachedCommand,
     generateProposalCommand,

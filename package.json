@@ -12,7 +12,8 @@
   ],
   "activationEvents": [
     "onStartupFinished",
-    "onView:openspecExplorer"
+    "onView:openspecExplorer",
+    "onView:openspecWelcome"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -53,9 +54,22 @@
         "icon": "$(search)"
       },
       {
+        "command": "openspec.init",
+        "title": "OpenSpec: Initialize",
+        "icon": "$(rocket)"
+      },
+      {
         "command": "openspec.applyChange",
         "title": "Apply Change",
         "icon": "$(check)"
+      },
+      {
+        "command": "openspec.ffChange",
+        "title": "Fast-Forward Change",
+        "icon": {
+          "light": "media/fast-forward-light.svg",
+          "dark": "media/fast-forward-dark.svg"
+        }
       },
       {
         "command": "openspec.archiveChange",
@@ -71,6 +85,11 @@
         "command": "openspec.opencode.openUi",
         "title": "OpenSpec: Open OpenCode UI",
         "icon": "$(link-external)"
+      },
+      {
+        "command": "openspec.opencode.newChange",
+        "title": "OpenSpec: New Change (OpenCode)",
+        "icon": "$(add)"
       },
       {
         "command": "openspec.opencode.generateRunnerScript",
@@ -92,6 +111,16 @@
           "command": "openspec.opencode.openUi",
           "when": "view == openspecExplorer && openspec:initialized",
           "group": "navigation@2"
+        },
+        {
+          "command": "openspec.opencode.newChange",
+          "when": "view == openspecExplorer && openspec:initialized",
+          "group": "navigation@3"
+        },
+        {
+          "command": "openspec.init",
+          "when": "view == openspecWelcome && !openspec:initialized",
+          "group": "navigation@1"
         }
       ],
       "view/item/context": [
@@ -101,8 +130,13 @@
           "group": "inline"
         },
         {
+          "command": "openspec.ffChange",
+          "when": "view == openspecExplorer && viewItem == change:active:scaffold",
+          "group": "inline"
+        },
+        {
           "command": "openspec.archiveChange",
-          "when": "view == openspecExplorer && viewItem == change:active",
+          "when": "view == openspecExplorer && (viewItem == change:active || viewItem == change:active:scaffold)",
           "group": "inline"
         }
       ]
