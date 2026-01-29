@@ -4,6 +4,14 @@
   "description": "VS Code extension for OpenSpec spec-driven development workflow",
   "version": "1.0.0",
   "publisher": "AngDrew",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AngDrew/openspec-vscode.git"
+  },
+  "homepage": "https://github.com/AngDrew/openspec-vscode#readme",
+  "bugs": {
+    "url": "https://github.com/AngDrew/openspec-vscode/issues"
+  },
   "engines": {
     "vscode": "^1.74.0"
   },

@@ -1,218 +1,123 @@
 # OpenSpec VS Code Extension
 
-A VS Code extension that integrates the OpenSpec spec‑driven development workflow into the editor, with a strong focus on CLI workflows over GUI automation.
+[![Version](https://img.shields.io/badge/version-1.0.0-informational.svg)](package.json)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![VS Code](https://img.shields.io/badge/vscode-%5E1.74.0-007ACC.svg)](https://code.visualstudio.com/)
 
-## Overview
+A VS Code extension that brings an OpenSpec-style, spec-driven workflow into the editor: browse changes/specs, inspect artifacts in a rich webview, and trigger CLI-first automation through OpenSpec + OpenCode.
 
-This extension adds an **OpenSpec** view to the VS Code Activity Bar so you can:
+## What the project does
 
-- Browse active and completed OpenSpec changes
-- Browse capabilities/specifications
-- Open a rich detail view for a selected change
-- Trigger CLI‑driven workflows (Apply, Archive) from the explorer
+This extension contributes an **OpenSpec** Activity Bar container with:
 
-The extension intentionally favors the CLI (via `opencode` and `openspec`) rather than re‑implementing those flows in a GUI. When you press Apply or Archive, it shells out to your configured command templates.
+- **OpenSpec Explorer** tree: active changes, archived changes, and workspace specs.
+- **Change details webview**: renders `proposal.md`, `design.md`, `tasks.md`, and previews other files in a change folder.
+- **CLI-first actions**: start an OpenCode server, fast-forward scaffold-only changes, and apply a change using a bundled runner script.
 
-## Prerequisites
+The extension is intentionally not a GUI "wizard" for the workflow. Instead, it makes the OpenSpec/OpenCode loop convenient from inside VS Code while keeping the source of truth in your repository and CLI tools.
 
-You should have the following installed and available on your `PATH`:
+## Why the project is useful
 
-- **VS Code** `1.74.0` or higher
-- **OpenSpec CLI** (for initializing and managing OpenSpec workspaces)
-- **opencode CLI** (for handling `/openspec-apply` and `/openspec-archive` prompts)
+- **Faster navigation**: jump between changes and specs without hunting through folders.
+- **Artifact visibility**: read proposals/tasks/spec deltas in a focused, rendered view.
+- **Automation without lock-in**: actions run in the integrated terminal, so you can see logs and tweak your CLI setup.
+- **Safer by default**: the extension itself does not directly edit your OpenSpec files; it delegates changes to your tooling.
 
-The extension assumes:
+## How users can get started
 
-- `openspec` can be run in a VS Code integrated terminal
-- `opencode` can be run in a VS Code integrated terminal
+### Prerequisites
 
-## Installation
+- VS Code `^1.74.0`
+- An OpenSpec-initialized workspace (or the ability to run `openspec init`)
+- CLI tools available in your terminal:
+  - `openspec` (workspace initialization, listing changes)
+  - `opencode` (OpenCode server + skills-based task execution)
 
-You can use this extension in two ways:
+Note: the bundled runner script can fall back to `npx -y opencode-ai@1.1.40` if `opencode` is not on your PATH (see `ralph_opencode.mjs`).
 
-### From Marketplace (when published)
-
-- Open the Extensions view (`Ctrl+Shift+X` or `Cmd+Shift+X`)
-- Search for `OpenSpec VSCode`
-- Install the extension and reload VS Code
-
-### From VSIX
-
-If you have a `.vsix` file (for example, `openspec-vscode-0.0.5.vsix` in this repo):
-
-1. In VS Code, open the command palette: `Ctrl+Shift+P` / `Cmd+Shift+P`
-2. Run `Extensions: Install from VSIX...`
-3. Select the `openspec-vscode-0.0.x.vsix` file
-4. Reload VS Code when prompted
-
-## Setting Up an OpenSpec Workspace
-
-1. **Open a folder** that either:
-   - Already contains an `openspec/` directory  
-   - Or is where you want to initialize OpenSpec
-
-2. If OpenSpec is **not** initialized:
-   - The **OpenSpec** view will show a welcome message
-   - Click the "Initialize OpenSpec" link or run the command:
-     - `OpenSpec: Initialize Workspace` (runs `openspec init` in a terminal)
-
-3. Once initialized, the extension will:
-   - Detect the `openspec/` directory
-   - Set the `openspec:initialized` context
-   - Show the **OpenSpec Explorer** tree
-
-## Using the Extension
-
-### OpenSpec Explorer
-
-In the Activity Bar, select the **OpenSpec** icon to open the OpenSpec Explorer.
-
-The explorer shows:
-
-- **Changes**
-  - `Active Changes (N)` – current change directories under `openspec/changes/` (excluding `archive/`)
-  - `Completed Changes (M)` – archived change directories under `openspec/changes/archive/`
-- **Specifications**
-  - Each capability under `openspec/specs/[capability]/spec.md`
-  - Labels include the number of requirements per spec
-
-Selecting items:
-
-- **Change item** (active or completed)
-  - Single‑click: opens a rich detail webview showing proposal, tasks, and files
-- **Spec item**
-  - Single‑click: opens `spec.md` in the editor
-
-### Change Detail View
-
-When you click an individual change, the extension opens a **detail webview** that:
-
-- Displays `proposal.md` (if present) as rendered markdown
-- Displays `tasks.md` (if present) as rendered markdown
-- Lists other files under the change folder with collapsible previews
-- Supports markdown rendering for `.md` files, and code‑block display for non‑markdown files
-
-The detail view is for **inspection and navigation only**. It does not perform Apply/Archive operations itself. Those actions are intentionally kept in the explorer to keep the workflow CLI‑driven.
-
-### Apply and Archive (CLI‑first behavior)
-
-Apply and Archive actions live in the **side menu** (OpenSpec Explorer), not in the detail view.
-
-For each **active change** item, you'll see inline icons:
-
-- **Apply Change** (check icon)
-- **Archive Change** (archive icon)
-
-When you click:
-
-- **Apply Change**
-  - Runs the `openspec.applyCommandTemplate` in a VS Code terminal
-  - By default:
-    - `opencode --prompt "/openspec-apply"`
-- **Archive Change**
-  - Runs the `openspec.archiveCommandTemplate` in a VS Code terminal
-  - The `$changes` placeholder is replaced with the change ID (folder name)
-  - By default:
-    - `opencode --prompt "/openspec-archive $changes"`
-
-Example for a change with ID `horizontal-summary-layout`:
-
-- Apply:
-  - `opencode --prompt "/openspec-apply"`
-- Archive:
-  - `opencode --prompt "/openspec-archive horizontal-summary-layout"`
-
-This design means:
-
-- The extension **does not** implement apply/archive logic itself
-- It **delegates** to your CLI tools (`opencode` + `openspec`), so you keep full control over prompts, flows, and behavior
-- You can customize the templates to fit your own scripts or aliases
-
-## Configuration
-
-This extension contributes the following settings (in VS Code Settings under "OpenSpec"):
-
-### `openspec.applyCommandTemplate`
-
-- **Type**: `string`
-- **Default**: `opencode --prompt "/openspec-apply"`
-- **Description**:  
-  Command template to run when **Apply** is pressed in the OpenSpec Explorer.
-
-The special placeholder:
-
-- `$changes` – replaced with the selected change ID (e.g., `horizontal-summary-layout`)
-
-Although the default does not include `$changes`, you can add it if your `/openspec-apply` prompt expects it. For example:
-
-```jsonc
-"openspec.applyCommandTemplate": "opencode --prompt \"/openspec-apply $changes\""
-```
-
-### `openspec.archiveCommandTemplate`
-
-- **Type**: `string`
-- **Default**: `opencode --prompt "/openspec-archive $changes"`
-- **Description**:  
-  Command template to run when **Archive** is pressed in the OpenSpec Explorer.
-
-This default is equivalent to:
-
-```bash
-opencode --prompt "/openspec-archive horizontal-summary-layout"
-```
-
-for a change named `horizontal-summary-layout`.
-
-You can customize it to match your own workflow, for example:
-
-```jsonc
-"openspec.archiveCommandTemplate": "opencode --prompt \"my-custom-archive-prompt $changes\""
-```
-
-## Known Issues and Limitations
-
-- The extension is intentionally **CLI‑first**:
-  - It does not provide GUI wizards for applying or archiving changes.
-  - It assumes your CLI tooling (`opencode`, `openspec`) is installed and working.
-- Large files in the detail view are truncated or rejected to keep the webview responsive.
-
-See `CHANGELOG.md` for detailed version‑by‑version changes.
-
-## Working with this Extension
-
-1. Open a workspace containing an `openspec/` directory, or initialize one.
-2. Open the **OpenSpec** view in the Activity Bar.
-3. Browse **Active Changes** and **Completed Changes**.
-4. Click a change to open its detail view with proposal, tasks, and file previews.
-5. Use the inline icons on an active change to:
-   - **Apply** (runs `opencode --prompt "/openspec-apply"` by default)
-   - **Archive** (runs `opencode --prompt "/openspec-archive $changes"` by default)
-
-## Development
-
-### Building
+### Install (from source / local development)
 
 ```bash
 npm install
 npm run compile
 ```
 
-### Testing
+Then open this repo in VS Code and run the extension in an Extension Development Host (typically `F5`).
+
+### Package a VSIX
 
 ```bash
-npm run pretest
-npm run test
+npm install
+npm run vscode:prepublish
+npx vsce package
 ```
 
-### Packaging / Publishing
+Install the resulting `.vsix` via `Extensions: Install from VSIX...`.
+
+### Usage
+
+1. Open a folder that contains `openspec/` at the workspace root.
+   - If the workspace is not initialized yet, run `OpenSpec: Initialize` (runs `openspec init` in a terminal).
+2. Open the **OpenSpec** view from the Activity Bar.
+3. Browse:
+   - `openspec/changes/<changeId>/` (active)
+   - `openspec/changes/archive/<changeId>/` (completed)
+   - `openspec/specs/<capability>/spec.md` (workspace specs)
+4. Click a change to open the **details webview**.
+
+#### Start OpenCode (optional but recommended)
+
+Run the command `OpenSpec: Start OpenCode Server`.
+
+This starts:
 
 ```bash
-npm install -g @vscode/vsce
-
-# Package
-vsce package
-
-# Publish (requires publisher and token configured)
-vsce publish
+opencode serve --port 4099 --print-logs
 ```
+
+You can open the UI in your browser with `OpenSpec: Open OpenCode UI`.
+
+#### Apply a change (task loop)
+
+In the **OpenSpec Explorer** view, use the inline **Apply Change** action on an active change. This runs the bundled task runner `ralph_opencode.mjs` in a dedicated terminal and iterates through `openspec/changes/<changeId>/tasks.md` one task at a time using the `openspec-apply-change` skill.
+
+If you want to run it manually:
+
+```bash
+node ralph_opencode.mjs --attach http://localhost:4099 --change your-change-id
+```
+
+#### Fast-forward scaffold-only changes
+
+If a change folder contains only `.openspec.yaml` (and optionally an empty `specs/`), the explorer shows a **Fast-Forward Change** action. It runs a prompt like:
+
+```bash
+opencode --prompt "use openspec ff skill to populate your-change-id"
+```
+
+#### Archive a change
+
+Use the inline **Archive Change** action. The extension will best-effort check whether `tasks.md` has any unchecked items and then delegates the archive flow to OpenCode.
+
+### Configuration
+
+- Port: the OpenCode server integration assumes `http://localhost:4099`.
+- Settings in `package.json` include `openspec.applyCommandTemplate` and `openspec.archiveCommandTemplate`, but the current implementation primarily uses the built-in OpenCode runner/skill prompts rather than templated shell commands.
+
+## Where users can get help
+
+- [`CHANGELOG.md`](CHANGELOG.md) for notable changes and release notes.
+- VS Code Output panel: the extension logs to the `OpenSpec Extension` output channel.
+- Command: `OpenSpec: Show Output` (command id: `openspec.showOutput`).
+- Open an issue in this repository for bugs/feature requests.
+- OpenCode/OpenSpec tooling reference: https://github.com/sst/opencode
+- If something fails, check that:
+  - your workspace has `openspec/` at the root
+  - `openspec` and `opencode` resolve in the integrated terminal
+  - the OpenCode server is listening on port `4099`
+
+## Who maintains and contributes
+
+- Maintainer: `AngDrew` (publisher listed in `package.json`).
+- Contributions: see [`CONTRIBUTING.md`](CONTRIBUTING.md).
+- License: MIT (see [`LICENSE`](LICENSE)).
