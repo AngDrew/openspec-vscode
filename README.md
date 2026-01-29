@@ -1,142 +1,142 @@
-# OpenSpec VS Code Extension
+# OpenSpecCodeExplorer
 
-[![Version](https://img.shields.io/badge/version-1.0.0-informational.svg)](package.json)
+[![Version](https://img.shields.io/github/package-json/v/AngDrew/openspec-vscode?label=version)](package.json)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![VS Code](https://img.shields.io/badge/vscode-%5E1.74.0-007ACC.svg)](https://code.visualstudio.com/)
 
-A VS Code extension that brings an OpenSpec-style, spec-driven workflow into the editor: browse changes/specs, inspect artifacts in a rich webview, and trigger CLI-first automation through OpenSpec + OpenCode.
+![OpenSpec icon](media/openspec-icon.svg)
 
-## IMPORTANT: OpenCode-only (Currently no support for all other agentic tools like claude code / codex / gemini cli)
+Spec-driven development inside VS Code, powered by OpenSpec + OpenCode.
 
-### THIS PROJECT IS BUILT FOR OPENCODE ONLY.
+- Browse `openspec/changes/*` and `openspec/specs/*` from the Activity Bar
+- Read `proposal.md`, `design.md`, and `tasks.md` in a focused details webview
+- Fast-forward scaffold-only changes into full artifacts
+- Apply tasks via the Ralph loop (batching supported with `--count`)
+- Monitor runs live at `http://localhost:4099`
 
-- Not supported: Claude Code, Codex CLI, Gemini CLI, or other “agentic” CLIs/runners.
-- The `Apply Change` action is wired to the built-in `ralph_opencode.mjs` task loop automatically and efficiently and improved accuracy to 90% (tested and proven)
-  - It iterates `openspec/changes/<changeId>/tasks.md` one task at a time using OpenCode skills.
-  - If you are not using OpenCode, the apply workflow in this extension is not expected to work.
+Note: this extension is built for OpenCode. Other agentic CLIs/runners (Claude Code, Codex CLI, Gemini CLI, etc.) are not supported.
 
-## What the project does
+## The Loop
 
-This extension contributes an **OpenSpec** Activity Bar container with:
+This extension is built around a very specific workflow:
 
-- **OpenSpec Explorer** tree: active changes, archived changes, and workspace specs.
-- **Change details webview**: renders `proposal.md`, `design.md`, `tasks.md`, and previews other files in a change folder.
-- **CLI-first actions**: start an OpenCode server, fast-forward scaffold-only changes, and apply a change using a bundled runner script.
+1. Plan mode: use OpenCode to discuss the request until you are satisfied with what you want.
+2. Build mode: ask OpenCode to write the spec change artifacts.
+3. Fast-forward: close OpenCode, then click the Fast-Forward icon on the newly created scaffold-only change.
+   - This continues the previous OpenCode session and generates all artifacts while keeping the context window efficient.
+4. Apply change (Ralph loop): start applying tasks from the extension.
+   - Optionally set a task count per invocation (`--count`) to save time.
+5. Watch the magic: the loop works on up to `--count` tasks per run.
+   - Each loop spawns a fresh OpenCode run (fresh context per batch), which helps reduce drift and hallucinations.
+6. Monitor in real time: open `http://localhost:4099` to watch progress.
+   - The extension tries to spawn/attach OpenCode on `localhost:4099` before running automation.
 
-The extension is intentionally not a GUI "wizard" for the workflow. Instead, it makes the OpenSpec/OpenCode loop convenient from inside VS Code while keeping the source of truth in your repository and CLI tools.
+Graceful behavior:
 
-## Why the project is useful
+- If you set `--count 50` but only 10 tasks exist, it stops gracefully when tasks are done.
+- If you stop the loop mid-way from the OpenCode web UI, it breaks the loop safely.
 
-- **Faster navigation**: jump between changes and specs without hunting through folders.
-- **Artifact visibility**: read proposals/tasks/spec deltas in a focused, rendered view.
-- **Automation without lock-in**: actions run in the integrated terminal, so you can see logs and tweak your CLI setup.
-- **Safer by default**: the extension itself does not directly edit your OpenSpec files; it delegates changes to your tooling.
+## What you get
 
-## How users can get started
+The extension to automate OpenSpec with:
 
-### Prerequisites
+- OpenSpec Explorer tree: active changes, archived changes, and workspace specs
+- Change details webview: renders artifacts and previews other files in a change folder
+- Opencode CLI-first actions: start OpenCode server, fast-forward artifacts, apply tasks, archive changes, draft requirements interactively
+
+![alt text](spec-creation.png)
+![alt text](explorer.png)
+
+The extension is intentionally not a GUI wizard. It keeps OpenSpec as the source of truth and drives automation through terminals.
+
+## Prerequisites
 
 - VS Code `^1.74.0`
-- An OpenSpec-initialized workspace (or the ability to run `openspec init`)
+- An OpenSpec-initialized workspace (or you can run `openspec init`)
 - CLI tools available in your terminal:
-  - `openspec` (workspace initialization, listing changes)
-  - `opencode` (OpenCode server + skills-based task execution)
+  - openspec 
+  ```bash
+  npm install -g @fission-ai/openspec@latest
+  ```
+  - opencode 
+   ```bash
+   npm install -g opencode-ai
+   ```
 
-Note: the bundled runner script can fall back to `npx -y opencode-ai@1.1.40` if `opencode` is not on your PATH (see `ralph_opencode.mjs`).
+Runner fallback: if `opencode` is not on your PATH, the bundled runner can fall back to `npx -y opencode-ai@1.1.40` (see `ralph_opencode.mjs`).
 
-### Install (from source / local development)
+## Quickstart
+
+1. Open a folder that contains `openspec/` at the workspace root.
+   - If not initialized yet: run `OpenSpec: Initialize` (runs `openspec init` in a terminal).
+2. Open the OpenSpec view from the Activity Bar.
+3. Start the server: run command or just press the opencode icon `OpenSpec: Start OpenCode Server`.
+   - It runs:
+
+```bash
+opencode serve --port 4099 --print-logs
+```
+
+4. Create/spec a change: run `OpenSpec: New Change (OpenCode)` (plan mode first).
+5. Fast-forward artifacts: click `Fast-Forward Change` on scaffold-only changes.
+6. Apply tasks: click `Apply Change` and enter how many tasks to run for this invocation (default 1).
+7. Monitor: run `OpenSpec: Open OpenCode UI` or open `http://localhost:4099`.
+
+## Apply Change (Ralph loop)
+
+When you click Apply Change, the extension:
+
+- best-effort ensures a local OpenCode server is listening on port 4099
+- runs the bundled cross-platform runner `ralph_opencode.mjs`
+- iterates through `openspec/changes/<changeId>/tasks.md` in order using the `openspec-apply-change` skill
+
+Manual runner usage:
+
+```bash
+node ralph_opencode.mjs --attach http://localhost:4099 --change your-change-id [--count <n>]
+```
+
+`--count <n>` runs up to `n` tasks in a single invocation (default: `1`).
+
+## Fast-forward scaffold-only changes
+
+If an active change folder contains only `.openspec.yaml` (and optionally an empty `specs/`), the explorer shows `Fast-Forward Change`.
+
+It runs a continuation prompt like:
+
+```bash
+opencode run --attach localhost:4099 --continue "use openspec ff skill to populate <changeId>"
+```
+
+## Known limitations / bugs
+
+- Multi-root / multiple projects: not supported. OpenCode `serve` is tied to a single folder. If you use this extension across multiple projects in parallel, it may spawn/attach OpenCode in the first project and then fail to find specs in the other workspace.
+
+## Help / troubleshooting
+
+- Logs: VS Code Output panel -> `OpenSpec Extension` or run `OpenSpec: Show Output`.
+- If the server is not responding, check the `OpenCode Server` terminal and verify port 4099 is free.
+- Verify your workspace has `openspec/` at the root and that `openspec` + `opencode` resolve in the integrated terminal.
+- OpenSpec/OpenCode tooling reference: https://github.com/sst/opencode
+
+## Development
+
+Install deps and build:
 
 ```bash
 npm install
 npm run compile
 ```
 
-Then open this repo in VS Code and run the extension in an Extension Development Host (typically `F5`).
-
-### Package a VSIX
+Package a VSIX:
 
 ```bash
-npm install
 npm run vscode:prepublish
 npx vsce package
 ```
 
-Install the resulting `.vsix` via `Extensions: Install from VSIX...`.
+More:
 
-### Usage
-
-1. Open a folder that contains `openspec/` at the workspace root.
-   - If the workspace is not initialized yet, run `OpenSpec: Initialize` (runs `openspec init` in a terminal).
-2. Open the **OpenSpec** view from the Activity Bar.
-3. Browse:
-   - `openspec/changes/<changeId>/` (active)
-   - `openspec/changes/archive/<changeId>/` (completed)
-   - `openspec/specs/<capability>/spec.md` (workspace specs)
-4. Click a change to open the **details webview**.
-
-#### Start OpenCode (optional but recommended)
-
-Run the command `OpenSpec: Start OpenCode Server`.
-
-This starts:
-
-```bash
-opencode serve --port 4099 --print-logs
-```
-
-You can open the UI in your browser with `OpenSpec: Open OpenCode UI`.
-
-#### Apply a change (task loop)
-
-In the **OpenSpec Explorer** view, use the inline **Apply Change** action on an active change. This runs the bundled task runner `ralph_opencode.mjs` in a dedicated terminal and iterates through `openspec/changes/<changeId>/tasks.md` one task at a time using the `openspec-apply-change` skill.
-
-If you want to run it manually:
-
-```bash
-node ralph_opencode.mjs --attach http://localhost:4099 --change your-change-id [--count <n>]
-```
-
-Optionally, pass `--count <n>` to run up to `n` tasks in a single invocation (default: `1`):
-
-```bash
-node ralph_opencode.mjs --attach http://localhost:4099 --change your-change-id --count 3
-```
-
-#### Fast-forward scaffold-only changes
-
-If a change folder contains only `.openspec.yaml` (and optionally an empty `specs/`), the explorer shows a **Fast-Forward Change** action. It runs a prompt like:
-
-```bash
-opencode --prompt "use openspec ff skill to populate your-change-id"
-```
-
-#### Archive a change
-
-Use the inline **Archive Change** action. The extension will best-effort check whether `tasks.md` has any unchecked items and then delegates the archive flow to OpenCode.
-
-### Configuration
-
-- Port: the OpenCode server integration assumes `http://localhost:4099`.
-
-
-## Roadmap
-
-- Support running more tasks per `ralph_opencode.mjs` loop.
-
-## Where users can get help
-
-- [`CHANGELOG.md`](CHANGELOG.md) for notable changes and release notes.
-- VS Code Output panel: the extension logs to the `OpenSpec Extension` output channel.
-- Command: `OpenSpec: Show Output` (command id: `openspec.showOutput`).
-- Open an issue in this repository for bugs/feature requests.
-- OpenCode/OpenSpec tooling reference: https://github.com/sst/opencode
-- If something fails, check that:
-  - your workspace has `openspec/` at the root
-  - `openspec` and `opencode` resolve in the integrated terminal
-  - the OpenCode server is listening on port `4099`
-
-## Who maintains and contributes
-
-- Maintainer: `AngDrew` (publisher listed in `package.json`).
-- Contributions: see [`CONTRIBUTING.md`](CONTRIBUTING.md).
-- License: MIT (see [`LICENSE`](LICENSE)).
+- Release notes: `CHANGELOG.md`
+- Contributing: `CONTRIBUTING.md`
+- License: `LICENSE`

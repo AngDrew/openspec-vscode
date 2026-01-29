@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping improve the OpenSpec VS Code extension.
+Thanks for helping improve OpenSpecCodeExplorer.
 
 ## Development setup
 

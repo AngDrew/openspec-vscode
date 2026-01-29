@@ -1,6 +1,6 @@
-# OpenSpec VS Code Extension Changelog
+# OpenSpecCodeExplorer Changelog
 
-All notable changes to the OpenSpec VS Code extension will be documented in this file.
+All notable changes to OpenSpecCodeExplorer will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Initial release of OpenSpec VS Code extension
+- Initial release of OpenSpecCodeExplorer
 - OpenSpec Explorer tree view in Activity Bar
 - Workspace initialization detection
 - File system watcher for automatic UI refresh
