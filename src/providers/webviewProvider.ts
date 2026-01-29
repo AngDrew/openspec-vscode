@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { marked } from 'marked';
 import { WorkspaceUtils } from '../utils/workspace';
+import { ErrorHandler } from '../utils/errorHandler';
 import { TreeItemData } from '../types';
 
 export class OpenSpecWebviewProvider implements vscode.WebviewPanelSerializer {
@@ -25,7 +26,7 @@ export class OpenSpecWebviewProvider implements vscode.WebviewPanelSerializer {
   }
 
   async deserializeWebviewPanel(_webviewPanel: vscode.WebviewPanel, _state: unknown) {
-    console.log('Deserializing webview panel');
+    ErrorHandler.debug('Deserializing webview panel');
     // Handle panel restoration if needed
   }
 
@@ -295,7 +296,8 @@ export class OpenSpecWebviewProvider implements vscode.WebviewPanelSerializer {
       
       return fileSections.join('');
     } catch (error) {
-      console.error('Error rendering files list:', error);
+      const err = error instanceof Error ? error : new Error(String(error));
+      ErrorHandler.handle(err, 'rendering files list', false);
       return '';
     }
   }
@@ -334,7 +336,8 @@ export class OpenSpecWebviewProvider implements vscode.WebviewPanelSerializer {
         proposalContent = marked(proposalMarkdown);
       }
     } catch (error) {
-      console.error('Error reading proposal file:', error);
+      const err = error instanceof Error ? error : new Error(String(error));
+      ErrorHandler.handle(err, 'reading proposal.md', false);
     }
 
     try {
@@ -344,7 +347,8 @@ export class OpenSpecWebviewProvider implements vscode.WebviewPanelSerializer {
         designContent = marked(designMarkdown);
       }
     } catch (error) {
-      console.error('Error reading design file:', error);
+      const err = error instanceof Error ? error : new Error(String(error));
+      ErrorHandler.handle(err, 'reading design.md', false);
     }
 
     try {
@@ -354,7 +358,8 @@ export class OpenSpecWebviewProvider implements vscode.WebviewPanelSerializer {
         tasksContent = marked(tasksMarkdown);
       }
     } catch (error) {
-      console.error('Error reading tasks file:', error);
+      const err = error instanceof Error ? error : new Error(String(error));
+      ErrorHandler.handle(err, 'reading tasks.md', false);
     }
 
     try {
@@ -384,7 +389,8 @@ export class OpenSpecWebviewProvider implements vscode.WebviewPanelSerializer {
         specsList = specLinks.join('');
       }
     } catch (error) {
-      console.error('Error building specs list:', error);
+      const err = error instanceof Error ? error : new Error(String(error));
+      ErrorHandler.handle(err, 'building specs list', false);
     }
 
     // Summary section removed as requested
@@ -531,4 +537,3 @@ export class OpenSpecWebviewProvider implements vscode.WebviewPanelSerializer {
     });
   }
 }
-

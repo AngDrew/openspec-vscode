@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { TreeItemData } from '../types';
+import { ErrorHandler } from '../utils/errorHandler';
 import { WorkspaceUtils } from '../utils/workspace';
 
 export class OpenSpecExplorerProvider implements vscode.TreeDataProvider<TreeItemData> {
@@ -159,8 +160,8 @@ export class OpenSpecExplorerProvider implements vscode.TreeDataProvider<TreeIte
 
   private async getActiveChanges(changesDir: string): Promise<TreeItemData[]> {
     const changeNames = await WorkspaceUtils.listDirectories(changesDir);
-    console.log(`[OpenSpec] Looking for changes in: ${changesDir}`);
-    console.log(`[OpenSpec] Found directories: ${JSON.stringify(changeNames)}`);
+    ErrorHandler.debug(`[ExplorerProvider] Looking for changes in: ${changesDir}`);
+    ErrorHandler.debug(`[ExplorerProvider] Found directories: ${JSON.stringify(changeNames)}`);
     const items: TreeItemData[] = [];
 
     for (const changeName of changeNames) {
@@ -260,10 +261,10 @@ export class OpenSpecExplorerProvider implements vscode.TreeDataProvider<TreeIte
 
   private updateWorkspaceFolder(): void {
     const workspaceFolders = vscode.workspace.workspaceFolders;
-    console.log(`[OpenSpec] Workspace folders: ${JSON.stringify(workspaceFolders?.map(f => f.uri.fsPath) || [])}`);
+    ErrorHandler.debug(`[ExplorerProvider] Workspace folders: ${JSON.stringify(workspaceFolders?.map(f => f.uri.fsPath) || [])}`);
     if (workspaceFolders && workspaceFolders.length > 0) {
       this._workspaceFolder = workspaceFolders[0];
-      console.log(`[OpenSpec] Selected workspace: ${this._workspaceFolder.uri.fsPath}`);
+      ErrorHandler.debug(`[ExplorerProvider] Selected workspace: ${this._workspaceFolder.uri.fsPath}`);
     } else {
       this._workspaceFolder = undefined;
     }
