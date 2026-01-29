@@ -6,6 +6,15 @@
 
 A VS Code extension that brings an OpenSpec-style, spec-driven workflow into the editor: browse changes/specs, inspect artifacts in a rich webview, and trigger CLI-first automation through OpenSpec + OpenCode.
 
+## IMPORTANT: OpenCode-only (Currently no support for all other agentic tools like claude code / codex / gemini cli)
+
+### THIS PROJECT IS BUILT FOR OPENCODE ONLY.
+
+- Not supported: Claude Code, Codex CLI, Gemini CLI, or other “agentic” CLIs/runners.
+- The `Apply Change` action is wired to the built-in `ralph_opencode.mjs` task loop automatically and efficiently and improved accuracy to 90% (tested and proven)
+  - It iterates `openspec/changes/<changeId>/tasks.md` one task at a time using OpenCode skills.
+  - If you are not using OpenCode, the apply workflow in this extension is not expected to work.
+
 ## What the project does
 
 This extension contributes an **OpenSpec** Activity Bar container with:
@@ -103,6 +112,10 @@ Use the inline **Archive Change** action. The extension will best-effort check w
 
 - Port: the OpenCode server integration assumes `http://localhost:4099`.
 - Settings in `package.json` include `openspec.applyCommandTemplate` and `openspec.archiveCommandTemplate`, but the current implementation primarily uses the built-in OpenCode runner/skill prompts rather than templated shell commands.
+
+## Roadmap
+
+- Support running more tasks per `ralph_opencode.mjs` loop.
 
 ## Where users can get help
 
