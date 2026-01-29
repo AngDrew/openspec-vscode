@@ -13,6 +13,34 @@ let cacheManager: CacheManager;
 let openCodeServerTerminal: vscode.Terminal | undefined;
 let openCodeRunnerTerminal: vscode.Terminal | undefined;
 
+async function sleep(ms: number): Promise<void> {
+  await new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function ensureLocalOpenCodeServerReady(timeoutMs: number = 15000): Promise<boolean> {
+  try {
+    const alreadyListening = await WorkspaceUtils.isOpenCodeServerListening();
+    if (alreadyListening) {
+      return true;
+    }
+
+    // Use the same behavior as the explicit start button.
+    await vscode.commands.executeCommand('openspec.opencode.startServer');
+
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < timeoutMs) {
+      if (await WorkspaceUtils.isOpenCodeServerListening(500)) {
+        return true;
+      }
+      await sleep(500);
+    }
+
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 function pickNodeCommand(): string {
   const base = path.basename(process.execPath).toLowerCase();
   if (base === 'node' || base === 'node.exe') {
@@ -89,6 +117,14 @@ function registerCommands(context: vscode.ExtensionContext) {
     }
 
     try {
+      const ready = await ensureLocalOpenCodeServerReady();
+      if (!ready) {
+        vscode.window.showErrorMessage(
+          'OpenCode server is not responding on port 4099. It may still be starting; check the "OpenCode Server" terminal.'
+        );
+        return;
+      }
+
       // Apply is the Ralph loop: generate runner and run attached.
       // This mirrors the spec behavior (task loop parity) using the cross-platform script.
       await vscode.commands.executeCommand('openspec.opencode.runRunnerAttached', {
@@ -297,6 +333,24 @@ function registerCommands(context: vscode.ExtensionContext) {
         if (typeof maybeChangeId === 'string' && maybeChangeId.trim().length > 0) {
           changeId = maybeChangeId.trim();
         }
+      }
+
+      // If we're attaching to the local default server, ensure it's actually running first.
+      try {
+        const parsed = new URL(url);
+        const isLocalHost = parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1' || parsed.hostname === '::1';
+        const isDefaultPort = (parsed.port ? Number(parsed.port) : (parsed.protocol === 'https:' ? 443 : 80)) === 4099;
+        if (isLocalHost && isDefaultPort) {
+          const ready = await ensureLocalOpenCodeServerReady();
+          if (!ready) {
+            vscode.window.showErrorMessage(
+              'OpenCode server is not responding on port 4099. It may still be starting; check the "OpenCode Server" terminal.'
+            );
+            return;
+          }
+        }
+      } catch {
+        // If URL parsing fails, proceed without auto-starting.
       }
 
       const workspaceRoot = workspaceFolders[0].uri;
