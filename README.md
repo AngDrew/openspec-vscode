@@ -93,7 +93,13 @@ In the **OpenSpec Explorer** view, use the inline **Apply Change** action on an 
 If you want to run it manually:
 
 ```bash
-node ralph_opencode.mjs --attach http://localhost:4099 --change your-change-id
+node ralph_opencode.mjs --attach http://localhost:4099 --change your-change-id [--count <n>]
+```
+
+Optionally, pass `--count <n>` to run up to `n` tasks in a single invocation (default: `1`):
+
+```bash
+node ralph_opencode.mjs --attach http://localhost:4099 --change your-change-id --count 3
 ```
 
 #### Fast-forward scaffold-only changes
@@ -111,7 +117,7 @@ Use the inline **Archive Change** action. The extension will best-effort check w
 ### Configuration
 
 - Port: the OpenCode server integration assumes `http://localhost:4099`.
-- Settings in `package.json` include `openspec.applyCommandTemplate` and `openspec.archiveCommandTemplate`, but the current implementation primarily uses the built-in OpenCode runner/skill prompts rather than templated shell commands.
+
 
 ## Roadmap
 

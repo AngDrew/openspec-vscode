@@ -2,7 +2,7 @@
   "name": "openspec-vscode",
   "displayName": "OpenSpec VSCode",
   "description": "VS Code extension for OpenSpec spec-driven development workflow",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "publisher": "AngDrew",
   "repository": {
     "type": "git",
@@ -19,9 +19,7 @@
     "Other"
   ],
   "activationEvents": [
-    "onStartupFinished",
-    "onView:openspecExplorer",
-    "onView:openspecWelcome"
+    "onStartupFinished"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -81,13 +79,16 @@
       },
       {
         "command": "openspec.archiveChange",
-        "title": "Archive Change",
+        "title": "OpenSpec: Archive Change",
         "icon": "$(archive)"
       },
       {
         "command": "openspec.opencode.startServer",
         "title": "OpenSpec: Start OpenCode Server",
-        "icon": "$(debug-start)"
+        "icon": {
+          "light": "media/opencode-logo-light.svg",
+          "dark": "media/opencode-logo-dark.svg"
+        }
       },
       {
         "command": "openspec.opencode.openUi",
@@ -149,22 +150,7 @@
         }
       ]
     },
-    "keybindings": [],
-    "configuration": {
-      "title": "OpenSpec",
-      "properties": {
-        "openspec.applyCommandTemplate": {
-          "type": "string",
-          "default": "opencode --prompt \"/openspec-apply\"",
-          "description": "Command template to run when Apply is pressed. Use $changes as a placeholder for the change ID."
-        },
-        "openspec.archiveCommandTemplate": {
-          "type": "string",
-          "default": "opencode --prompt \"/openspec-archive $changes\"",
-          "description": "Command template to run when Archive is pressed. Use $changes as a placeholder for the change ID."
-        }
-      }
-    }
+    "keybindings": []
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",

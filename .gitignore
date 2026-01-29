@@ -83,3 +83,5 @@ temp/
 
 # DynamoDB Local files
 .dynamodb/
+
+.vscode-test

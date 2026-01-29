@@ -1,179 +1,169 @@
 # Repository Agent Guide (openspec-vscode)
 
-This repo is a VS Code extension written in TypeScript. Follow existing patterns in `src/` and keep changes scoped.
+This repo is a VS Code extension written in TypeScript. Keep changes scoped, follow existing patterns in `src/`, and avoid committing generated output.
 
-## Build / Lint / Test
+## Commands (Build / Lint / Test)
 
 Package manager: `npm` (lockfile: `package-lock.json`). Run commands from the repo root.
+
+Install deps:
 
 ```bash
 npm install
 ```
 
-### Build
+Build (TypeScript -> `out/`):
 
 ```bash
 npm run compile
 ```
 
-Watch:
+Watch mode:
 
 ```bash
 npm run watch
 ```
 
-Prepublish (used by VS Code packaging):
-
-```bash
-npm run vscode:prepublish
-```
-
-Notes:
-- Extension entrypoint is `out/extension.js`.
-- If `tsc` is not found, run `npm install` first.
-
-### Lint
+Lint (ESLint over `src/**/*.ts`):
 
 ```bash
 npm run lint
 ```
 
-Auto-fix:
+Lint autofix (safe default):
 
 ```bash
 npx eslint src --ext ts --fix
 ```
 
+Prepublish (what VS Code packaging uses):
+
+```bash
+npm run vscode:prepublish
+```
+
 ### Tests
 
-Tests use Mocha (TDD interface: `suite()` / `test()`), located in `test/suite/`.
+Tests use Mocha (TDD interface: `suite()` / `test()`), run via the VS Code test harness.
 
-Compile + lint + compile tests:
+Full test pipeline (compile + lint + compile tests):
 
 ```bash
 npm run pretest
 ```
 
-Run tests (expects compiled output under `out/test/`):
+Run tests (executes compiled harness at `out/test/test/runTest.js`):
 
 ```bash
 npm test
 ```
 
-Compile then run:
+Compile then run tests (convenience):
 
 ```bash
 npm run test:compile
 ```
 
-Where this comes from (`package.json`):
-- `pretest`: `npm run compile && npm run lint && tsc -p ./tsconfig.test.json`
-- `test`: `node ./out/test/test/runTest.js`
+#### Running a single test (recommended workflow)
 
-#### Run a single test (file or name)
+`npm test` loads all compiled `*.test.js` under `out/test/` (see `test/runTest.ts`). For single-test iteration, run Mocha directly against compiled output.
 
-`npm test` uses a harness that loads compiled `*.test.js` (see `test/runTest.ts`). For single-test workflows, run Mocha directly against compiled output.
-
-1) Compile tests:
+1) Compile tests once:
 
 ```bash
 npm run pretest
 ```
 
-2) Run one test file:
+2) Run a single test file:
 
 ```bash
-npx mocha "out/test/test/suite/extension.test.js" --timeout 60000
+npx mocha "out/test/test/suite/workspace.test.js" --timeout 60000
 ```
 
-3) Run by test name:
+3) Run a single test by name:
 
 ```bash
-npx mocha "out/test/test/suite/extension.test.js" --grep "Should register commands" --timeout 60000
+npx mocha "out/test/test/suite/workspace.test.js" --grep "Workspace" --timeout 60000
 ```
 
-If the path differs, inspect `out/test/` for the compiled structure.
+If paths differ, inspect `out/test/` (compiled structure mirrors `test/`).
 
 ### Packaging
 
+Do not commit built artifacts (`out/`, `dist/`, `*.vsix`). To package locally:
+
 ```bash
-npm install -g @vscode/vsce
-vsce package
+npx vsce package
 ```
 
-## Project Layout
+## Project Layout (key files)
 
-- `src/extension.ts` - activation, commands, watchers
-- `src/providers/explorerProvider.ts` - tree view
-- `src/providers/webviewProvider.ts` - webview panel + HTML
-- `src/utils/workspace.ts` - filesystem + OpenSpec discovery (cached)
-- `src/utils/errorHandler.ts` - output channel logging
-- `src/utils/cache.ts` - TTL cache
+- `src/extension.ts` - entrypoint (`activate`/`deactivate`)
+- `src/extension/commands.ts` - command registration and terminal integration
+- `src/extension/watcher.ts` - `openspec/**` filesystem watcher + debounce
+- `src/providers/explorerProvider.ts` - activity bar tree view
+- `src/providers/webviewProvider.ts` - details webview + CSP + message handling
+- `src/utils/workspace.ts` - filesystem helpers + caching + OpenCode port checks
+- `src/utils/errorHandler.ts` - output channel + user notifications
 - `src/types/index.ts` - shared types
-- `test/runTest.ts` - Mocha harness
-- `test/suite/*.test.ts` - tests
+- `test/runTest.ts` - Mocha harness (adds `**/**.test.js`)
+- `test/suite/*.test.ts` - test suites
 
-Generated (do not commit): `out/`, `dist/`, `*.vsix`.
+## Code Style (TypeScript)
 
-## Code Style
+Compiler settings:
+- `strict: true` (`tsconfig.json`)
+- `target: ES2020`, `module: commonjs`, `rootDir: src`, `outDir: out`
 
-### TypeScript / Types
+Types:
+- Prefer `unknown` + narrowing over `any`
+- `any` is acceptable for VS Code mocks or external untyped boundaries in tests
+- Keep async APIs `Promise<T>` and use early returns to reduce nesting
 
-- `strict: true` in `tsconfig.json`.
-- Prefer `unknown` + narrowing over `any`.
-- `any` is acceptable for VS Code mocks in tests.
+Formatting:
+- 2-space indent, single quotes, semicolons (match existing files)
+- No Prettier; do not reformat unrelated code
 
-### Formatting
-
-- 2-space indent
-- single quotes
-- semicolons
-- No Prettier config: match existing formatting in `src/*.ts`.
-
-### Imports
-
-Use the repo's established patterns:
-- VS Code API: `import * as vscode from 'vscode';`
+Imports:
+- VS Code: `import * as vscode from 'vscode';`
 - Node builtins: `import * as path from 'path';`, `import * as fs from 'fs/promises';`
-- Third-party: idiomatic imports (e.g. `import { marked } from 'marked';`).
+- Third-party: idiomatic (e.g. `import { marked } from 'marked';`)
+- Order: `vscode` -> Node -> third-party -> local
 
-Recommended order: `vscode` -> Node -> third-party -> local.
+Naming:
+- Classes/types: `PascalCase`
+- Functions/vars: `camelCase`
+- Files: `camelCase.ts` (follow existing)
+- OpenSpec change IDs: `kebab-case` (folder names under `openspec/changes/`)
 
-### Naming
+Lint rules (see `.eslintrc.js`):
+- `@typescript-eslint/no-unused-vars`: error, allow unused args prefixed with `_`
+- `@typescript-eslint/no-explicit-any`: warn
+- ESLint ignores `out/`, `dist/`, `node_modules/`, and `*.js`
 
-- Classes: `PascalCase`
-- functions/vars: `camelCase`
-- files: `camelCase.ts` (match existing)
-- OpenSpec change IDs: `kebab-case`
+## Error Handling / Logging
 
-### Error Handling / Logging
+- Prefer `ErrorHandler.handle(err, 'context', showMessage?)` over `console.*`
+- Include actionable context strings ("reading tasks.md", "setup file watcher", etc.)
+- Avoid silent `catch {}` unless explicitly best-effort; otherwise log via `ErrorHandler.debug`/`handle`
+- Extension uses an output channel: `OpenSpec Extension`
 
-- Prefer `ErrorHandler` (`src/utils/errorHandler.ts`) over `console.*`.
-- For actionable failures, include context: `ErrorHandler.handle(err, 'what failed')`.
-- Avoid silent catch blocks; either log or surface the error.
+## VS Code Extension Patterns
 
-### VS Code Extension Patterns
+- Push disposables to `context.subscriptions`
+- Keep `activate()` lightweight; delegate to helpers
+- Use `vscode.Uri` with VS Code APIs; use `path.join` for filesystem paths
+- Debounce watcher refreshes (see `src/extension/watcher.ts`)
+- Terminals: reuse existing terminals by name when possible (see `src/extension/commands.ts`)
 
-- Push disposables to `context.subscriptions`.
-- Keep `activate()` lightweight.
-- Prefer `vscode.Uri` with VS Code APIs; use `path.join` for filesystem paths.
-- Debounce file watcher events; don't spam notifications.
+## Webview Safety
 
-### Webview Safety
-
-- Keep CSP strict.
-- Use `webview.asWebviewUri(...)` for local resources.
-- Escape file paths used in HTML attributes.
-- Treat webview messages as untrusted input; validate `message.type` and fields.
-
-### Tests
-
-- Mocha TDD (`suite`, `test`, `setup`, `suiteSetup`).
-- Keep tests deterministic; avoid network.
-- Use `path.join` to avoid platform path issues.
-- Use Node `assert`.
+- Keep CSP strict; only allow local scripts/styles via `${webview.cspSource}`
+- Use `webview.asWebviewUri(...)` for extension resources
+- Escape values used in HTML attributes (see `escapeAttr` pattern)
+- Treat webview messages as untrusted; validate `message.type` and payload before acting
 
 ## Cursor / Copilot Rules
 
-- Cursor rules: none found (`.cursor/rules/` and `.cursorrules` not present).
-- Copilot rules: none found (`.github/copilot-instructions.md` not present).
+- Cursor rules: none found (no `.cursor/rules/` and no `.cursorrules`)
+- Copilot rules: none found (no `.github/copilot-instructions.md`)
