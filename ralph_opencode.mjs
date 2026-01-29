@@ -12,10 +12,10 @@ function die(message, code = 1) {
 
 function printHelp() {
   process.stdout.write(
-    `Usage: ralph_opencode.mjs [--attach URL] [--change CHANGE] [--count N]\n\nOptions:\n` +
+    `Usage: ralph_opencode.mjs [--attach URL] [--change CHANGE] [--count <n>]\n\nOptions:\n` +
     `  --attach URL     Attach to an opencode server (e.g. http://localhost:4096)\n` +
     `  --change CHANGE  Target change id under openspec/changes/<change>\n` +
-    `  --count N        Run up to N tasks in this invocation (default: 1)\n\nEnv:\n` +
+    `  --count <n>      Run up to N tasks in this invocation (default: 1)\n\nEnv:\n` +
     `  OPENCODE_ATTACH_URL  Same as --attach\n` +
     `  OPENSPEC_CHANGE      Same as --change\n` +
     `  OPENCODE_NPX_PKG     Fallback npx package (default: opencode-ai@1.1.40)\n`
@@ -210,6 +210,61 @@ function isTaskDone(tasksText, tid) {
   return re.test(tasksText);
 }
 
+function findNextUncheckedTaskIds(tasksText, limit) {
+  const safeLimit = Number.isFinite(limit) && limit > 0 ? limit : 0;
+  if (safeLimit <= 0) return [];
+
+  const out = [];
+  const re = /^- \[ \] ([0-9]+(\.[0-9]+)*)([\s]|$)/gm;
+  let m;
+  while ((m = re.exec(tasksText)) !== null) {
+    out.push(m[1]);
+    if (out.length >= safeLimit) break;
+  }
+  return out;
+}
+
+function countNewlyCompletedIds(beforeText, afterText, ids) {
+  const newlyCompleted = [];
+  for (const id of ids) {
+    if (!isTaskDone(beforeText, id) && isTaskDone(afterText, id)) {
+      newlyCompleted.push(id);
+    }
+  }
+  return newlyCompleted;
+}
+
+function findAllTaskIds(tasksText) {
+  const out = [];
+  const re = /^- \[[ x]\] ([0-9]+(\.[0-9]+)*)([\s]|$)/gm;
+  let m;
+  while ((m = re.exec(tasksText)) !== null) {
+    out.push(m[1]);
+  }
+  return out;
+}
+
+function countNewlyCompletedOutsideSet(beforeText, afterText, allowedIdsSet) {
+  const idsAfter = findAllTaskIds(afterText);
+  const newlyCompleted = [];
+  for (const id of idsAfter) {
+    if (!allowedIdsSet.has(id)) {
+      if (!isTaskDone(beforeText, id) && isTaskDone(afterText, id)) {
+        newlyCompleted.push(id);
+      }
+    }
+  }
+  return newlyCompleted;
+}
+
+function isPrefix(prefix, full) {
+  if (prefix.length > full.length) return false;
+  for (let i = 0; i < prefix.length; i++) {
+    if (prefix[i] !== full[i]) return false;
+  }
+  return true;
+}
+
 function extractTaskBlock(tasksText, tid) {
   const tidRe = escapeRegexLiteral(tid);
   const startRe = new RegExp(`^- \\[[ x]\\] ${tidRe}([\\s]|$)`);
@@ -270,7 +325,9 @@ process.stdout.write('\n');
 let completedThisRun = 0;
 for (let iter = 1; iter <= maxItersSafe; iter++) {
   if (completedThisRun >= tasksPerRun) {
-    process.stdout.write(`Reached tasks-per-run limit (${tasksPerRun}). Stopping early (iteration ${iter}).\n`);
+    process.stdout.write(
+      `Reached tasks-per-run limit (${tasksPerRun}) after completing ${completedThisRun} task(s). Stopping early.\n`
+    );
     process.exit(0);
   }
 
@@ -280,16 +337,24 @@ for (let iter = 1; iter <= maxItersSafe; iter++) {
     process.exit(0);
   }
 
-  const tid = findNextUncheckedTaskId(tasksTextBefore);
-  if (!tid) {
-    die(`ERROR: Could not find next unchecked task in ${tasksFile}`, 2);
+  const remainingBudget = tasksPerRun - completedThisRun;
+  const batchIds = findNextUncheckedTaskIds(tasksTextBefore, remainingBudget);
+  if (!batchIds || batchIds.length === 0) {
+    die(`ERROR: Could not find next unchecked task(s) in ${tasksFile}`, 2);
   }
 
-  process.stdout.write(`== Iteration ${iter} / ${maxItersSafe} : task ${tid} ==\n`);
+  const firstId = batchIds[0];
+  process.stdout.write(
+    `== Iteration ${iter} / ${maxItersSafe} : starting ${firstId} (batch size ${batchIds.length}) ==\n`
+  );
 
-  const taskBlock = extractTaskBlock(tasksTextBefore, tid);
-  if (!taskBlock) {
-    die(`ERROR: Could not extract task block for task ${tid} from ${tasksFile}`, 2);
+  const blocks = [];
+  for (const id of batchIds) {
+    const block = extractTaskBlock(tasksTextBefore, id);
+    if (!block) {
+      die(`ERROR: Could not extract task block for task ${id} from ${tasksFile}`, 2);
+    }
+    blocks.push(block);
   }
 
   const opencodeArgs = ['run'];
@@ -298,16 +363,24 @@ for (let iter = 1; iter <= maxItersSafe; iter++) {
   }
   opencodeArgs.push('use skills openspec-apply-change to apply');
 
-  const prompt = `Target change: ${changeName}\n` +
-    `Tasks file: ${tasksFile}\n\n` +
-    `Work on EXACTLY ONE task: ${tid}\n` +
+  const prompt =
+    `Target change: ${changeName}\n` +
+    `Tasks file: ${tasksFile}\n` +
+    `Tasks-per-run (--count): ${tasksPerRun}\n` +
+    `Remaining budget this invocation: ${batchIds.length}\n\n` +
+    `Complete tasks in order, up to ${batchIds.length} task(s) (this run).\n` +
+    `Task IDs (complete in order):\n` +
+    batchIds.map(id => `- ${id}`).join('\n') +
+    `\n\n` +
     `Task details (verbatim from tasks.md):\n` +
-    `${taskBlock}\n\n` +
-    `- Only implement work for task ${tid}\n` +
-    `- Do NOT start or modify other task ids\n` +
+    blocks.join('\n\n') +
+    `\n\n` +
+    `Rules:\n` +
+    `- Only implement work for the task IDs listed above\n` +
+    `- Do NOT start, modify, or check off any other task ids\n` +
     `- If it is a test/qa/review and it fail, fix it\n` +
-    `- When finished, mark ONLY task ${tid} as done in ${tasksFile} by changing:\n` +
-    `  - [ ] ${tid}  ->  - [x] ${tid}\n`;
+    `- As you finish each task, mark it done in ${tasksFile} by changing:\n` +
+    `  - [ ] <id>  ->  - [x] <id>\n`;
 
   const runRes = runOpencodeWithFallback(opencodeArgs, prompt);
   if (runRes.error) {
@@ -327,12 +400,44 @@ for (let iter = 1; iter <= maxItersSafe; iter++) {
   }
 
   const tasksTextAfter = fs.readFileSync(tasksFile, 'utf8');
-  if (!isTaskDone(tasksTextAfter, tid)) {
-    die(`Task ${tid} was NOT marked done in ${tasksFile} after iteration ${iter}.\nRefusing to continue to avoid looping blindly.`, 3);
+  const completedIds = countNewlyCompletedIds(tasksTextBefore, tasksTextAfter, batchIds);
+  if (completedIds.length === 0) {
+    die(
+      `None of the requested tasks were marked done in ${tasksFile} after iteration ${iter}.\n` +
+        `Requested (in order): ${batchIds.join(', ')}\n` +
+        'Refusing to continue to avoid looping blindly.',
+      3
+    );
   }
 
-  completedThisRun += 1;
-  process.stdout.write(`Task ${tid} completed.\n\n`);
+  if (!isPrefix(completedIds, batchIds)) {
+    die(
+      `Tasks were checked off out of order after iteration ${iter}.\n` +
+        `Requested (in order): ${batchIds.join(', ')}\n` +
+        `Completed: ${completedIds.join(', ')}\n` +
+        'Refusing to continue to avoid skipping tasks.',
+      3
+    );
+  }
+
+  const allowed = new Set(batchIds);
+  const completedOutside = countNewlyCompletedOutsideSet(tasksTextBefore, tasksTextAfter, allowed);
+  if (completedOutside.length > 0) {
+    die(
+      `Unexpected tasks were marked done outside the requested batch after iteration ${iter}: ${completedOutside.join(', ')}\n` +
+        `Requested batch: ${batchIds.join(', ')}\n` +
+        'Refusing to continue to enforce --count budget.',
+      3
+    );
+  }
+
+  completedThisRun += completedIds.length;
+  process.stdout.write(`Completed ${completedIds.length} task(s): ${completedIds.join(', ')}\n\n`);
+
+  if (allDone(tasksTextAfter)) {
+    process.stdout.write('All tasks completed.\n');
+    process.exit(0);
+  }
 }
 
 const tasksTextAfterLoop = fs.readFileSync(tasksFile, 'utf8');

@@ -4,6 +4,33 @@ import * as os from 'os';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
 
+function parseTaskIdsFromRunnerPrompt(input: string): string[] {
+  const lines = String(input || '').split(/\r?\n/);
+  const ids: string[] = [];
+  let inList = false;
+
+  for (const raw of lines) {
+    const line = raw.trimEnd();
+    if (!inList) {
+      if (line === 'Task IDs (complete in order):') {
+        inList = true;
+      }
+      continue;
+    }
+
+    if (!line.trim()) {
+      break;
+    }
+
+    const m = line.match(/^\s*-\s*([0-9]+(\.[0-9]+)*)\s*$/);
+    if (m) {
+      ids.push(m[1]);
+    }
+  }
+
+  return ids;
+}
+
 function normSlashes(p: string) {
   return p.replace(/\\/g, '/');
 }
@@ -68,14 +95,34 @@ suite('Ralph Runner Test Suite', () => {
           '(async () => {',
           '  // The runner passes the full prompt via stdin.',
           '  const input = await readStdin();',
-          "  const tidMatch = input.match(/^Work on EXACTLY ONE task: ([0-9]+(\\.[0-9]+)*)$/m);",
           "  const fileMatch = input.match(/^Tasks file: (.+)$/m);",
-          "  if (!tidMatch || !fileMatch) {",
-          "    process.stderr.write('fake opencode: missing tid/tasks file in input\\n');",
+          "  if (!fileMatch) {",
+          "    process.stderr.write('fake opencode: missing tasks file in input\\n');",
           '    process.exit(2);',
           '  }',
-          "  const tid = tidMatch[1];",
           "  const tasksFile = fileMatch[1].trim();",
+          '  const ids = (function parseIds(text) {',
+          "    const lines = String(text || '').split(/\\r?\\n/);",
+          '    const out = [];',
+          '    let inList = false;',
+          '    for (const raw of lines) {',
+          '      const line = raw.trimEnd();',
+          "      if (!inList) {",
+          "        if (line === 'Task IDs (complete in order):') inList = true;",
+          '        continue;',
+          '      }',
+          '      if (!line.trim()) break;',
+          "      const m = line.match(/^\\s*-\\s*([0-9]+(\\.[0-9]+)*)\\s*$/);",
+          '      if (m) out.push(m[1]);',
+          '    }',
+          '    return out;',
+          '  })(input);',
+          '  if (!ids || ids.length === 0) {',
+          "    process.stderr.write('fake opencode: missing task ids list in input\\n');",
+          '    process.exit(2);',
+          '  }',
+          '  // Default behavior: mark ONLY the first task done (simulates conservative agent behavior).',
+          '  const tid = ids[0];',
           '  if (!markTaskDone(tasksFile, tid)) {',
           "    process.stderr.write(`fake opencode: could not mark ${tid} in ${tasksFile}\\n`);",
           '    process.exit(3);',
@@ -103,7 +150,7 @@ suite('Ralph Runner Test Suite', () => {
 
       assert.ok(await pathExists(tasksFile), `Expected tasks file to exist at ${tasksFile}`);
 
-      const runnerPath = path.join(__dirname, '..', '..', 'ralph_opencode.mjs');
+      const runnerPath = path.join(__dirname, '..', '..', '..', '..', 'ralph_opencode.mjs');
       const env = {
         ...process.env,
         OPENCODE_NPX_PKG: 'this-should-not-be-used',
@@ -183,17 +230,38 @@ suite('Ralph Runner Test Suite', () => {
           '',
           '(async () => {',
           '  const input = await readStdin();',
-          "  const tidMatch = input.match(/^Work on EXACTLY ONE task: ([0-9]+(\\.[0-9]+)*)$/m);",
           "  const fileMatch = input.match(/^Tasks file: (.+)$/m);",
-          "  if (!tidMatch || !fileMatch) {",
-          "    process.stderr.write('fake opencode: missing tid/tasks file in input\\n');",
+          "  if (!fileMatch) {",
+          "    process.stderr.write('fake opencode: missing tasks file in input\\n');",
           '    process.exit(2);',
           '  }',
-          "  const tid = tidMatch[1];",
           "  const tasksFile = fileMatch[1].trim();",
-          '  if (!markTaskDone(tasksFile, tid)) {',
-          "    process.stderr.write(`fake opencode: could not mark ${tid} in ${tasksFile}\\n`);",
-          '    process.exit(3);',
+          '  const ids = (function parseIds(text) {',
+          "    const lines = String(text || '').split(/\\r?\\n/);",
+          '    const out = [];',
+          '    let inList = false;',
+          '    for (const raw of lines) {',
+          '      const line = raw.trimEnd();',
+          "      if (!inList) {",
+          "        if (line === 'Task IDs (complete in order):') inList = true;",
+          '        continue;',
+          '      }',
+          '      if (!line.trim()) break;',
+          "      const m = line.match(/^\\s*-\\s*([0-9]+(\\.[0-9]+)*)\\s*$/);",
+          '      if (m) out.push(m[1]);',
+          '    }',
+          '    return out;',
+          '  })(input);',
+          '  if (!ids || ids.length === 0) {',
+          "    process.stderr.write('fake opencode: missing task ids list in input\\n');",
+          '    process.exit(2);',
+          '  }',
+          '  // Batch behavior: mark ALL requested tasks done.',
+          '  for (const tid of ids) {',
+          '    if (!markTaskDone(tasksFile, tid)) {',
+          "      process.stderr.write(`fake opencode: could not mark ${tid} in ${tasksFile}\\n`);",
+          '      process.exit(3);',
+          '    }',
           '  }',
           '  process.exit(0);',
           '})();',
@@ -214,7 +282,7 @@ suite('Ralph Runner Test Suite', () => {
 
       assert.ok(await pathExists(tasksFile), `Expected tasks file to exist at ${tasksFile}`);
 
-      const runnerPath = path.join(__dirname, '..', '..', 'ralph_opencode.mjs');
+      const runnerPath = path.join(__dirname, '..', '..', '..', '..', 'ralph_opencode.mjs');
       const env = {
         ...process.env,
         OPENCODE_NPX_PKG: 'this-should-not-be-used',
@@ -291,17 +359,38 @@ suite('Ralph Runner Test Suite', () => {
           '',
           '(async () => {',
           '  const input = await readStdin();',
-          "  const tidMatch = input.match(/^Work on EXACTLY ONE task: ([0-9]+(\\.[0-9]+)*)$/m);",
           "  const fileMatch = input.match(/^Tasks file: (.+)$/m);",
-          "  if (!tidMatch || !fileMatch) {",
-          "    process.stderr.write('fake opencode: missing tid/tasks file in input\\n');",
+          "  if (!fileMatch) {",
+          "    process.stderr.write('fake opencode: missing tasks file in input\\n');",
           '    process.exit(2);',
           '  }',
-          "  const tid = tidMatch[1];",
           "  const tasksFile = fileMatch[1].trim();",
-          '  if (!markTaskDone(tasksFile, tid)) {',
-          "    process.stderr.write(`fake opencode: could not mark ${tid} in ${tasksFile}\\n`);",
-          '    process.exit(3);',
+          '  const ids = (function parseIds(text) {',
+          "    const lines = String(text || '').split(/\\r?\\n/);",
+          '    const out = [];',
+          '    let inList = false;',
+          '    for (const raw of lines) {',
+          '      const line = raw.trimEnd();',
+          "      if (!inList) {",
+          "        if (line === 'Task IDs (complete in order):') inList = true;",
+          '        continue;',
+          '      }',
+          '      if (!line.trim()) break;',
+          "      const m = line.match(/^\\s*-\\s*([0-9]+(\\.[0-9]+)*)\\s*$/);",
+          '      if (m) out.push(m[1]);',
+          '    }',
+          '    return out;',
+          '  })(input);',
+          '  if (!ids || ids.length === 0) {',
+          "    process.stderr.write('fake opencode: missing task ids list in input\\n');",
+          '    process.exit(2);',
+          '  }',
+          '  // Batch behavior: mark ALL requested tasks done.',
+          '  for (const tid of ids) {',
+          '    if (!markTaskDone(tasksFile, tid)) {',
+          "      process.stderr.write(`fake opencode: could not mark ${tid} in ${tasksFile}\\n`);",
+          '      process.exit(3);',
+          '    }',
           '  }',
           '  process.exit(0);',
           '})();',
@@ -322,7 +411,7 @@ suite('Ralph Runner Test Suite', () => {
 
       assert.ok(await pathExists(tasksFile), `Expected tasks file to exist at ${tasksFile}`);
 
-      const runnerPath = path.join(__dirname, '..', '..', 'ralph_opencode.mjs');
+      const runnerPath = path.join(__dirname, '..', '..', '..', '..', 'ralph_opencode.mjs');
       const env = {
         ...process.env,
         OPENCODE_NPX_PKG: 'this-should-not-be-used',
@@ -337,7 +426,7 @@ suite('Ralph Runner Test Suite', () => {
       });
 
       assert.strictEqual(res.status, 0, `Runner should exit 0. stderr=\n${res.stderr}`);
-      assert.ok(res.stdout.includes('All tasks completed. Stopping early'), 'Runner should stop early when all tasks are done');
+      assert.ok(res.stdout.includes('All tasks completed'), 'Runner should stop early when all tasks are done');
 
       const updated = await fs.readFile(tasksFile, 'utf8');
       assert.ok(updated.includes('- [x] 1.1'), 'Runner should complete the first task');
@@ -397,21 +486,43 @@ suite('Ralph Runner Test Suite', () => {
           '',
           '(async () => {',
           '  const input = await readStdin();',
-          "  const tidMatch = input.match(/^Work on EXACTLY ONE task: ([0-9]+(\\.[0-9]+)*)$/m);",
           "  const fileMatch = input.match(/^Tasks file: (.+)$/m);",
-          "  if (!tidMatch || !fileMatch) {",
-          "    process.stderr.write('fake opencode: missing tid/tasks file in input\\n');",
+          "  if (!fileMatch) {",
+          "    process.stderr.write('fake opencode: missing tasks file in input\\n');",
           '    process.exit(2);',
           '  }',
-          "  const tid = tidMatch[1];",
           "  const tasksFile = fileMatch[1].trim();",
-          '  // Simulate a no-op run that exits 0 but fails to check off task 1.2.',
-          "  if (tid === '1.2') {",
-          '    process.exit(0);',
+          '  const ids = (function parseIds(text) {',
+          "    const lines = String(text || '').split(/\\r?\\n/);",
+          '    const out = [];',
+          '    let inList = false;',
+          '    for (const raw of lines) {',
+          '      const line = raw.trimEnd();',
+          "      if (!inList) {",
+          "        if (line === 'Task IDs (complete in order):') inList = true;",
+          '        continue;',
+          '      }',
+          '      if (!line.trim()) break;',
+          "      const m = line.match(/^\\s*-\\s*([0-9]+(\\.[0-9]+)*)\\s*$/);",
+          '      if (m) out.push(m[1]);',
+          '    }',
+          '    return out;',
+          '  })(input);',
+          '  if (!ids || ids.length === 0) {',
+          "    process.stderr.write('fake opencode: missing task ids list in input\\n');",
+          '    process.exit(2);',
           '  }',
-          '  if (!markTaskDone(tasksFile, tid)) {',
-          "    process.stderr.write(`fake opencode: could not mark ${tid} in ${tasksFile}\\n`);",
-          '    process.exit(3);',
+          '  // Simulate a no-op run that exits 0 but fails to check off the FIRST task in the batch.',
+          '  // The runner should treat this as "no progress" and abort before moving on.',
+          '  for (let i = 0; i < ids.length; i++) {',
+          '    const tid = ids[i];',
+          '    if (i === 0) {',
+          '      continue;',
+          '    }',
+          '    if (!markTaskDone(tasksFile, tid)) {',
+          "      process.stderr.write(`fake opencode: could not mark ${tid} in ${tasksFile}\\n`);",
+          '      process.exit(3);',
+          '    }',
           '  }',
           '  process.exit(0);',
           '})();',
@@ -432,7 +543,7 @@ suite('Ralph Runner Test Suite', () => {
 
       assert.ok(await pathExists(tasksFile), `Expected tasks file to exist at ${tasksFile}`);
 
-      const runnerPath = path.join(__dirname, '..', '..', 'ralph_opencode.mjs');
+      const runnerPath = path.join(__dirname, '..', '..', '..', '..', 'ralph_opencode.mjs');
       const env = {
         ...process.env,
         OPENCODE_NPX_PKG: 'this-should-not-be-used',
@@ -448,14 +559,14 @@ suite('Ralph Runner Test Suite', () => {
 
       assert.strictEqual(res.status, 3, `Runner should exit 3 when a task is not checked off. stderr=\n${res.stderr}`);
       assert.ok(
-        (res.stderr || '').includes('was NOT marked done') || (res.stdout || '').includes('was NOT marked done'),
-        'Runner should explain that it refuses to continue when the task is not marked done'
+        (res.stderr || '').includes('Refusing to continue') || (res.stdout || '').includes('Refusing to continue'),
+        'Runner should explain that it refuses to continue when tasks are not checked off as expected'
       );
 
       const updated = await fs.readFile(tasksFile, 'utf8');
-      assert.ok(updated.includes('- [x] 1.1'), 'Runner should have completed the first task');
-      assert.ok(updated.includes('- [ ] 1.2'), 'Runner should not treat the second task as complete');
-      assert.ok(updated.includes('- [ ] 1.3'), 'Runner should not proceed beyond the failed verification task');
+      assert.ok(updated.includes('- [ ] 1.1'), 'Runner should not treat the first task as complete');
+      assert.ok(updated.includes('- [x] 1.2'), 'fake opencode marks later tasks, but runner should still abort');
+      assert.ok(updated.includes('- [x] 1.3'), 'fake opencode marks later tasks, but runner should still abort');
     } finally {
       await fs.rm(tmpRoot, { recursive: true, force: true });
     }
@@ -508,7 +619,7 @@ suite('Ralph Runner Test Suite', () => {
 
       assert.ok(await pathExists(tasksFile), `Expected tasks file to exist at ${tasksFile}`);
 
-      const runnerPath = path.join(__dirname, '..', '..', 'ralph_opencode.mjs');
+      const runnerPath = path.join(__dirname, '..', '..', '..', '..', 'ralph_opencode.mjs');
       const env = {
         ...process.env,
         OPENCODE_NPX_PKG: 'this-should-not-be-used',

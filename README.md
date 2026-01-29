@@ -93,7 +93,7 @@ In the **OpenSpec Explorer** view, use the inline **Apply Change** action on an 
 If you want to run it manually:
 
 ```bash
-node ralph_opencode.mjs --attach http://localhost:4099 --change your-change-id
+node ralph_opencode.mjs --attach http://localhost:4099 --change your-change-id [--count <n>]
 ```
 
 Optionally, pass `--count <n>` to run up to `n` tasks in a single invocation (default: `1`):

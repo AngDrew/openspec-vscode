@@ -2,7 +2,7 @@
   "name": "openspec-vscode",
   "displayName": "OpenSpec VSCode",
   "description": "VS Code extension for OpenSpec spec-driven development workflow",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "publisher": "AngDrew",
   "repository": {
     "type": "git",
@@ -20,6 +20,16 @@
   ],
   "activationEvents": [
     "onStartupFinished",
+    "onCommand:openspec.viewDetails",
+    "onCommand:openspec.init",
+    "onCommand:openspec.applyChange",
+    "onCommand:openspec.ffChange",
+    "onCommand:openspec.archiveChange",
+    "onCommand:openspec.opencode.startServer",
+    "onCommand:openspec.opencode.openUi",
+    "onCommand:openspec.opencode.newChange",
+    "onCommand:openspec.opencode.generateRunnerScript",
+    "onCommand:openspec.opencode.runRunnerAttached",
     "onView:openspecExplorer",
     "onView:openspecWelcome"
   ],
