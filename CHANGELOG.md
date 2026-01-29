@@ -1,4 +1,4 @@
-# OpenSpecCodeExplorer Changelog
+# Changelog
 
 All notable changes to OpenSpecCodeExplorer will be documented in this file.
 
@@ -7,54 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-01-29
+
 ### Added
-- Initial release of OpenSpecCodeExplorer
-- OpenSpec Explorer tree view in Activity Bar
-- Workspace initialization detection
-- File system watcher for automatic UI refresh
-- Detailed view webview for change proposals
-- Command Palette integration with OpenSpec commands
-- Performance optimizations with caching
-- Comprehensive error handling and user feedback
-- Basic test suite
+- Batch OpenCode runner tasks via `--count`.
+- Run multiple tasks per OpenCode runner loop.
 
 ### Changed
-- Nothing yet
+- Activate OpenCode runner actions via commands.
+- Document multi-task runs and archive related OpenSpec change artifacts.
+
+## [1.1.0] - 2026-01-29
+
+### Changed
+- Clarify OpenCode-only support and update README roadmap.
+- Archive OpenSpec change artifacts for the src structure refactor.
 
 ### Fixed
-- Nothing yet
+- Add missing webview `charset`/`viewport` metadata and normalize EOL handling.
 
-## [0.0.1] - 2024-01-XX
+## [1.0.3] - 2026-01-29
+
+### Fixed
+- Check OpenCode server readiness before the fast-forward flow.
+
+## [1.0.2] - 2026-01-29
 
 ### Added
-- **OpenSpec Explorer**: Tree view displaying Changes and Specifications sections
-- **Workspace Detection**: Automatic detection of OpenSpec-initialized workspaces
-- **Welcome View**: Guidance for uninitialized workspaces
-- **File System Watching**: Real-time UI updates on openspec/ directory changes
-- **Detailed View**: Rich webview for viewing change proposals and tasks
-- **Command Palette Integration**: Commands for viewing details, listing changes, and generating proposals
-- **Performance Optimizations**: Caching system and lazy loading for large projects
-- **Error Handling**: Comprehensive error reporting with output channel
-- **Theme Support**: Respects VS Code's light/dark theme preferences
-- **Keyboard Shortcuts**: Ctrl+Shift+O (Cmd+Shift+O) for listing changes
+- Resume OpenCode runs in the fast-forward flow.
 
-### Features
-- Browse active and completed changes
-- View specifications with requirement counts
-- Open spec files directly from the explorer
-- View detailed change information in a dedicated webview
-- Automatic refresh when files change
-- Minimal startup impact with async initialization
+### Changed
+- Add/archive OpenSpec artifacts for the OpenCode controls workflow.
 
-### Technical Details
-- Built with TypeScript for type safety
-- Uses VS Code Extension API for native integration
-- Implements proper caching strategies for performance
-- Includes comprehensive error handling and logging
-- Follows VS Code extension best practices
+## [1.0.1] - 2026-01-29
 
-### Known Limitations
-- Read-only view (does not modify OpenSpec files)
-- Single workspace support (multi-root workspaces not supported)
-- No direct OpenSpec CLI integration (phase 2 feature)
-- No proposal generation UI (terminal-based only in phase 1)
+### Added
+- Auto-start the local OpenCode server before running extension actions.
+
+## [1.0.0] - 2026-01-29
+
+### Added
+- Initial release.
+- Activity bar explorer and details webview for OpenSpec changes/specs.
+- Commands to apply, fast-forward, and archive changes.
+- OpenCode server controls and "open UI" integration.
+
+[Unreleased]: https://github.com/AngDrew/openspec-vscode/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/AngDrew/openspec-vscode/compare/v1.1.0...v1.2.0
+[1.1.0]: https://github.com/AngDrew/openspec-vscode/compare/v1.0.3...v1.1.0
+[1.0.3]: https://github.com/AngDrew/openspec-vscode/compare/v1.0.2...v1.0.3
+[1.0.2]: https://github.com/AngDrew/openspec-vscode/compare/v1.0.1...v1.0.2
+[1.0.1]: https://github.com/AngDrew/openspec-vscode/compare/v1.0.0...v1.0.1
+[1.0.0]: https://github.com/AngDrew/openspec-vscode/releases/tag/v1.0.0
