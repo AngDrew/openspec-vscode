@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![VS Code](https://img.shields.io/badge/vscode-%5E1.74.0-007ACC.svg)](https://code.visualstudio.com/)
 
-![OpenSpec icon](media/openspec-icon.svg)
+![OpenSpec icon](media/openspec-icon.png)
 
 Spec-driven development inside VS Code, powered by OpenSpec + OpenCode.
 
