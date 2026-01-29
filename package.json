@@ -1,8 +1,8 @@
 {
   "name": "openspec-vscode",
-  "displayName": "OpenSpec VSCode",
+  "displayName": "OpenSpecCodeExplorer",
   "description": "VS Code extension for OpenSpec spec-driven development workflow",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "publisher": "AngDrew",
   "repository": {
     "type": "git",
