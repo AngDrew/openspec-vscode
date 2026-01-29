@@ -164,7 +164,7 @@ function registerCommands(context: vscode.ExtensionContext) {
       terminal.show(true);
 
       const prompt = `use openspec ff skill to populate ${changeId}`;
-      terminal.sendText(`opencode --prompt ${JSON.stringify(prompt)}`, true);
+      terminal.sendText(`opencode --continue --prompt ${JSON.stringify(prompt)}`, true);
     } catch (error) {
       vscode.window.showErrorMessage(
         `Failed to start fast-forward flow: ${error instanceof Error ? error.message : 'Unknown error'}`
