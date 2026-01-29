@@ -226,7 +226,7 @@ export class OpenSpecWebviewProvider implements vscode.WebviewPanelSerializer {
       : 'Attach to OpenCode at http://localhost:4099';
     const actionIcon = (isActive && isScaffoldOnly) ? '&gt;&gt;' : '&gt;';
     const hint = (isActive && isScaffoldOnly)
-      ? `Runs: opencode --prompt "use openspec ff skill to populate ${changeId}"`
+      ? `Runs: opencode run --attach localhost:4099 --continue "use openspec ff skill to populate ${changeId}"`
       : 'Runs the bundled Ralph runner (no workspace files created)';
 
     return `
