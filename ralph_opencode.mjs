@@ -15,7 +15,7 @@ function printHelp() {
     `Usage: ralph_opencode.mjs [--attach URL] [--change CHANGE] [--count <n>]\n\nOptions:\n` +
     `  --attach URL     Attach to an opencode server (e.g. http://localhost:4096)\n` +
     `  --change CHANGE  Target change id under openspec/changes/<change>\n` +
-    `  --count <n>      Run up to N tasks in this invocation (default: 1)\n\nEnv:\n` +
+    `  --count <n>      Include up to N tasks per opencode run iteration (default: 1)\n\nEnv:\n` +
     `  OPENCODE_ATTACH_URL  Same as --attach\n` +
     `  OPENSPEC_CHANGE      Same as --change\n` +
     `  OPENCODE_NPX_PKG     Fallback npx package (default: opencode-ai@1.1.40)\n`
@@ -65,6 +65,39 @@ function shouldUseShell(cmd) {
   return lower.endsWith('.cmd') || lower.endsWith('.bat');
 }
 
+function resolveWindowsCommand(cmd) {
+  if (process.platform !== 'win32') return cmd;
+
+  const raw = String(cmd || '').trim();
+  if (!raw) return cmd;
+
+  // If the command already has a path component, don't try PATH lookup.
+  if (raw.includes('\\') || raw.includes('/')) return raw;
+
+  // If the command has an extension, keep it.
+  if (path.extname(raw)) return raw;
+
+  const pathExt = (process.env.PATHEXT || '.COM;.EXE;.BAT;.CMD')
+    .split(';')
+    .map(s => s.trim())
+    .filter(Boolean);
+  const pathDirs = String(process.env.PATH || '')
+    .split(path.delimiter)
+    .map(s => s.trim())
+    .filter(Boolean);
+
+  for (const dir of pathDirs) {
+    for (const ext of pathExt) {
+      const candidate = path.join(dir, raw + ext.toLowerCase());
+      if (fs.existsSync(candidate)) return candidate;
+      const candidateUpper = path.join(dir, raw + ext.toUpperCase());
+      if (fs.existsSync(candidateUpper)) return candidateUpper;
+    }
+  }
+
+  return raw;
+}
+
 function runInherit(cmd, args, input, options = {}) {
   const res = spawnSync(cmd, args, {
     encoding: 'utf8',
@@ -81,7 +114,8 @@ function runInherit(cmd, args, input, options = {}) {
 }
 
 function runOpencodeWithFallback(opencodeArgs, input) {
-  const direct = runInherit('opencode', opencodeArgs, input);
+  const directCmd = resolveWindowsCommand('opencode');
+  const direct = runInherit(directCmd, opencodeArgs, input);
   if (!direct.error) {
     return direct;
   }
@@ -192,12 +226,6 @@ function pickFirstChangeNameFromOpenSpecList(output) {
 
 function isTaskLine(line) {
   return /^- \[[ x]\] [0-9]+(\.[0-9]+)*([\s]|$)/.test(line);
-}
-
-function findNextUncheckedTaskId(tasksText) {
-  const re = /^- \[ \] ([0-9]+(\.[0-9]+)*)([\s]|$)/m;
-  const m = tasksText.match(re);
-  return m ? m[1] : '';
 }
 
 function allDone(tasksText) {
@@ -322,23 +350,14 @@ if (attachUrl) {
 }
 process.stdout.write('\n');
 
-let completedThisRun = 0;
 for (let iter = 1; iter <= maxItersSafe; iter++) {
-  if (completedThisRun >= tasksPerRun) {
-    process.stdout.write(
-      `Reached tasks-per-run limit (${tasksPerRun}) after completing ${completedThisRun} task(s). Stopping early.\n`
-    );
-    process.exit(0);
-  }
-
   const tasksTextBefore = fs.readFileSync(tasksFile, 'utf8');
   if (allDone(tasksTextBefore)) {
     process.stdout.write(`All tasks completed. Stopping early (iteration ${iter}).\n`);
     process.exit(0);
   }
 
-  const remainingBudget = tasksPerRun - completedThisRun;
-  const batchIds = findNextUncheckedTaskIds(tasksTextBefore, remainingBudget);
+  const batchIds = findNextUncheckedTaskIds(tasksTextBefore, tasksPerRun);
   if (!batchIds || batchIds.length === 0) {
     die(`ERROR: Could not find next unchecked task(s) in ${tasksFile}`, 2);
   }
@@ -366,8 +385,6 @@ for (let iter = 1; iter <= maxItersSafe; iter++) {
   const prompt =
     `Target change: ${changeName}\n` +
     `Tasks file: ${tasksFile}\n` +
-    `Tasks-per-run (--count): ${tasksPerRun}\n` +
-    `Remaining budget this invocation: ${batchIds.length}\n\n` +
     `Complete tasks in order, up to ${batchIds.length} task(s) (this run).\n` +
     `Task IDs (complete in order):\n` +
     batchIds.map(id => `- ${id}`).join('\n') +
@@ -420,18 +437,6 @@ for (let iter = 1; iter <= maxItersSafe; iter++) {
     );
   }
 
-  const allowed = new Set(batchIds);
-  const completedOutside = countNewlyCompletedOutsideSet(tasksTextBefore, tasksTextAfter, allowed);
-  if (completedOutside.length > 0) {
-    die(
-      `Unexpected tasks were marked done outside the requested batch after iteration ${iter}: ${completedOutside.join(', ')}\n` +
-        `Requested batch: ${batchIds.join(', ')}\n` +
-        'Refusing to continue to enforce --count budget.',
-      3
-    );
-  }
-
-  completedThisRun += completedIds.length;
   process.stdout.write(`Completed ${completedIds.length} task(s): ${completedIds.join(', ')}\n\n`);
 
   if (allDone(tasksTextAfter)) {

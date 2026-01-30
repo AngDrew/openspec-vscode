@@ -25,15 +25,15 @@ The runner SHALL:
 - find the next unchecked task id matching `- [ ] <id>`
 - send a prompt to `opencode run` that instructs working on exactly that task id
 - verify the task was marked done (`- [x] <id>`) and stop with an error if not
-- optionally process more than one task per invocation when a tasks-per-run limit is configured
+- optionally include more than one task in each iteration prompt when a tasks-per-run count is configured
 
 #### Scenario: Marks tasks done sequentially
 - **WHEN** `tasks.md` contains unchecked tasks
 - **THEN** the runner processes tasks one-by-one and verifies each is checked off before continuing
 
-#### Scenario: Stops after N tasks
+#### Scenario: Includes up to N tasks per iteration
 - **WHEN** the runner is invoked with `--count 3`
-- **THEN** it stops after completing 3 tasks even if more unchecked tasks remain
+- **THEN** each `opencode run` iteration includes up to 3 unchecked tasks in the prompt
 
 #### Scenario: Default count is 1
 - **WHEN** the runner is invoked without `--count`

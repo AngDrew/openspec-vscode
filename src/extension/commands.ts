@@ -74,7 +74,7 @@ export function registerCommands(context: vscode.ExtensionContext, runtime: Exte
     try {
       const tasksPerRun = await vscode.window.showInputBox({
         title: 'OpenSpec: Apply Change',
-        prompt: 'Tasks to run for this invocation',
+        prompt: 'Tasks to include per OpenCode run (batch size)',
         value: '1',
         placeHolder: '1',
         validateInput: (value) => {

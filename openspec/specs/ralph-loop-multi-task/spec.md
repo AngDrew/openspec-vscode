@@ -12,7 +12,11 @@ The runner SHALL accept a `--count <n>` flag that controls how many tasks it pro
 
 #### Scenario: Runs up to N tasks
 - **WHEN** the runner is invoked with `--count 3`
-- **THEN** it processes up to 3 unchecked tasks sequentially (or fewer if the change completes)
+- **THEN** each `opencode run` iteration includes up to 3 unchecked tasks in the prompt (or fewer if fewer tasks remain)
+
+#### Scenario: Count does not change MAX_ITERS loop behavior
+- **WHEN** the runner is invoked with `--count 3`
+- **THEN** it continues iterating until tasks complete or `MAX_ITERS` is reached (as in the default behavior)
 
 #### Scenario: Invalid count is rejected
 - **WHEN** the runner is invoked with `--count 0` (or a non-integer)

@@ -79,7 +79,7 @@ opencode serve --port 4099 --print-logs
 
 4. Create/spec a change: run `OpenSpec: New Change (OpenCode)` (plan mode first).
 5. Fast-forward artifacts: click `Fast-Forward Change` on scaffold-only changes.
-6. Apply tasks: click `Apply Change` and enter how many tasks to run for this invocation (default 1).
+6. Apply tasks: click `Apply Change` and enter how many tasks to include per OpenCode run (batch size; default 1).
 7. Monitor: run `OpenSpec: Open OpenCode UI` or open `http://localhost:4099`.
 
 ## Apply Change (Ralph loop)
@@ -96,7 +96,7 @@ Manual runner usage:
 node ralph_opencode.mjs --attach http://localhost:4099 --change your-change-id [--count <n>]
 ```
 
-`--count <n>` runs up to `n` tasks in a single invocation (default: `1`).
+`--count <n>` includes up to `n` tasks per `opencode run` iteration (default: `1`).
 
 ## Fast-forward scaffold-only changes
 

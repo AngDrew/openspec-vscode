@@ -45,7 +45,7 @@ async function pathExists(p: string) {
 }
 
 suite('Ralph Runner Test Suite', () => {
-  test('Default run (no --count) completes exactly one task and exits 0', async () => {
+  test('Default run (no --count) includes one task per run and continues until done', async () => {
     const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'openspec-vscode-runner-'));
 
     try {
@@ -166,10 +166,11 @@ suite('Ralph Runner Test Suite', () => {
 
       assert.strictEqual(res.status, 0, `Runner should exit 0. stderr=\n${res.stderr}`);
       assert.ok(res.stdout.includes('Tasks/run  : 1'), 'Runner should default tasks-per-run to 1');
+      assert.ok(res.stdout.includes('All tasks completed'), 'Runner should run until all tasks are complete');
 
       const updated = await fs.readFile(tasksFile, 'utf8');
       assert.ok(updated.includes('- [x] 1.1'), 'Runner should complete the first task');
-      assert.ok(updated.includes('- [ ] 1.2'), 'Runner should stop after completing exactly one task');
+      assert.ok(updated.includes('- [x] 1.2'), 'Runner should complete the second task');
 
       // Helpful assertion when debugging path issues.
       assert.ok(normSlashes(res.stdout).includes(normSlashes(`Tasks file : openspec/changes/${changeName}/tasks.md`)));
@@ -178,7 +179,7 @@ suite('Ralph Runner Test Suite', () => {
     }
   });
 
-  test('--count 3 completes up to 3 tasks and stops (while preserving per-task verification)', async () => {
+  test('--count 3 includes up to 3 tasks per run and continues until done (while preserving per-task verification)', async () => {
     const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'openspec-vscode-runner-'));
 
     try {
@@ -298,13 +299,14 @@ suite('Ralph Runner Test Suite', () => {
 
       assert.strictEqual(res.status, 0, `Runner should exit 0. stderr=\n${res.stderr}`);
       assert.ok(res.stdout.includes('Tasks/run  : 3'), 'Runner should report tasks-per-run=3');
+      assert.ok(res.stdout.includes('All tasks completed'), 'Runner should run until all tasks are complete');
 
       const updated = await fs.readFile(tasksFile, 'utf8');
       assert.ok(updated.includes('- [x] 1.1'), 'Runner should complete the first task');
       assert.ok(updated.includes('- [x] 1.2'), 'Runner should complete the second task');
       assert.ok(updated.includes('- [x] 1.3'), 'Runner should complete the third task');
-      assert.ok(updated.includes('- [ ] 1.4'), 'Runner should stop after completing 3 tasks');
-      assert.ok(updated.includes('- [ ] 1.5'), 'Runner should stop after completing 3 tasks');
+      assert.ok(updated.includes('- [x] 1.4'), 'Runner should complete the fourth task');
+      assert.ok(updated.includes('- [x] 1.5'), 'Runner should complete the fifth task');
     } finally {
       await fs.rm(tmpRoot, { recursive: true, force: true });
     }
