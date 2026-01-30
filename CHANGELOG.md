@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-01-30
+
+### Changed
+- Clarify that `--count` controls the number of tasks included per runner iteration (batch size).
+
+### Fixed
+- Resolve runner commands on Windows by searching `PATH`/`PATHEXT` before execution.
+
 ## [1.2.1] - 2026-01-30
 
 ### Changed
@@ -61,7 +69,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Commands to apply, fast-forward, and archive changes.
 - OpenCode server controls and "open UI" integration.
 
-[Unreleased]: https://github.com/AngDrew/openspec-vscode/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/AngDrew/openspec-vscode/compare/v1.2.2...HEAD
+[1.2.2]: https://github.com/AngDrew/openspec-vscode/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/AngDrew/openspec-vscode/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/AngDrew/openspec-vscode/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/AngDrew/openspec-vscode/compare/v1.0.3...v1.1.0
