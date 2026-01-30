@@ -18,7 +18,7 @@ function printHelp() {
     `  --count <n>      Include up to N tasks per opencode run iteration (default: 1)\n\nEnv:\n` +
     `  OPENCODE_ATTACH_URL  Same as --attach\n` +
     `  OPENSPEC_CHANGE      Same as --change\n` +
-    `  OPENCODE_NPX_PKG     Fallback npx package (default: opencode-ai@1.1.40)\n`
+    `  OPENCODE_NPX_PKG     Fallback npx package (default: opencode-ai@1.1.44)\n`
   );
 }
 
@@ -124,7 +124,7 @@ function runOpencodeWithFallback(opencodeArgs, input) {
     return direct;
   }
 
-  const pkg = (process.env.OPENCODE_NPX_PKG || 'opencode-ai@1.1.40').trim();
+  const pkg = (process.env.OPENCODE_NPX_PKG || 'opencode-ai@1.1.44').trim();
   const npxCmd = pickNpxCommand();
   const npxArgs = ['-y', pkg, ...opencodeArgs];
   const viaNpx = runInherit(npxCmd, npxArgs, input);
@@ -424,7 +424,7 @@ for (let iter = 1; iter <= maxItersSafe; iter++) {
       die(
         'ERROR: opencode command not found (ENOENT).\n' +
         'Install opencode and ensure it is on PATH, then restart your terminal.\n' +
-        'Tip: this runner will also try `npx -y opencode-ai@1.1.40` as a fallback if available.\n' +
+        'Tip: this runner will also try `npx -y opencode-ai@1.1.44` as a fallback if available.\n' +
         'Quick check: run `opencode --help` in this terminal.',
         127
       );

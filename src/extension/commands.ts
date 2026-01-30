@@ -382,10 +382,10 @@ export function registerCommands(context: vscode.ExtensionContext, runtime: Exte
         }
 
         // Provide a sane default for environments where `opencode` isn't on PATH.
-        // The runner will attempt direct `opencode` first, then fall back to `npx -y opencode-ai@1.1.40`.
+        // The runner will attempt direct `opencode` first, then fall back to `npx -y opencode-ai@1.1.44`.
         const env = {
           ...process.env,
-          OPENCODE_NPX_PKG: process.env.OPENCODE_NPX_PKG || 'opencode-ai@1.1.40'
+          OPENCODE_NPX_PKG: process.env.OPENCODE_NPX_PKG || 'opencode-ai@1.1.44'
         };
 
         runtime.openCodeRunnerTerminal = vscode.window.createTerminal({

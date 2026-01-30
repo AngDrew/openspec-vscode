@@ -63,7 +63,7 @@ The extension is intentionally not a GUI wizard. It keeps OpenSpec as the source
    npm install -g opencode-ai
    ```
 
-Runner fallback: if `opencode` is not on your PATH, the bundled runner can fall back to `npx -y opencode-ai@1.1.40` (see `ralph_opencode.mjs`).
+Runner fallback: if `opencode` is not on your PATH, the bundled runner can fall back to `npx -y opencode-ai@1.1.44` (see `ralph_opencode.mjs`).
 
 ## Quickstart
 
