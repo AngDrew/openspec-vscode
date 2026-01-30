@@ -5,7 +5,13 @@ All notable changes to OpenSpecCodeExplorer will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.2.3]
+
+### Changed
+- Bound `--count` task batching to the parent section of the first task id in the batch.
+
+### Fixed
+- Prevent task detail extraction from including subsequent task section headers.
 
 ## [1.2.2] - 2026-01-30
 

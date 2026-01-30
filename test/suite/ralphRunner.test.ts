@@ -574,6 +574,107 @@ suite('Ralph Runner Test Suite', () => {
     }
   });
 
+  test('--count does not include cross-parent task IDs in the prompt', async () => {
+    const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'openspec-vscode-runner-'));
+
+    try {
+      const changeName = 'test-change';
+      const tasksFile = path.join(tmpRoot, 'openspec', 'changes', changeName, 'tasks.md');
+      await fs.mkdir(path.dirname(tasksFile), { recursive: true });
+
+      await fs.writeFile(
+        tasksFile,
+        [
+          '## Tasks',
+          '',
+          '- [ ] 1.1 First task',
+          '- [ ] 1.2 Second task',
+          '',
+          '## Other Section',
+          '',
+          '- [ ] 2.1 Third task',
+          '',
+        ].join('\n'),
+        'utf8'
+      );
+
+      const fakeBin = path.join(tmpRoot, 'fake-bin');
+      await fs.mkdir(fakeBin, { recursive: true });
+
+      const inputCaptureFile = path.join(tmpRoot, 'opencode-input.txt');
+      const opencodeJs = path.join(fakeBin, 'opencode.js');
+      await fs.writeFile(
+        opencodeJs,
+        [
+          "const fs = require('fs');",
+          '',
+          'function readStdin() {',
+          '  return new Promise((resolve) => {',
+          "    let buf = '';",
+          "    process.stdin.setEncoding('utf8');",
+          "    process.stdin.on('data', (c) => (buf += c));",
+          "    process.stdin.on('end', () => resolve(buf));",
+          '  });',
+          '}',
+          '',
+          '(async () => {',
+          '  const input = await readStdin();',
+          '  const capture = process.env.OPENCODE_INPUT_CAPTURE;',
+          '  if (capture) {',
+          "    fs.writeFileSync(capture, input, 'utf8');",
+          '  }',
+          '  // Do not modify tasks; runner should abort due to no progress.',
+          '  process.exit(0);',
+          '})();',
+          '',
+        ].join('\n'),
+        'utf8'
+      );
+
+      const isWin = process.platform === 'win32';
+      if (isWin) {
+        const opencodeCmd = path.join(fakeBin, 'opencode.cmd');
+        await fs.writeFile(opencodeCmd, ['@echo off', 'node "%~dp0opencode.js" %*'].join('\r\n') + '\r\n', 'utf8');
+      } else {
+        const opencodeSh = path.join(fakeBin, 'opencode');
+        await fs.writeFile(opencodeSh, ['#!/usr/bin/env sh', 'node "$(dirname "$0")/opencode.js" "$@"'].join('\n') + '\n', 'utf8');
+        await fs.chmod(opencodeSh, 0o755);
+      }
+
+      assert.ok(await pathExists(tasksFile), `Expected tasks file to exist at ${tasksFile}`);
+
+      const runnerPath = path.join(__dirname, '..', '..', '..', '..', 'ralph_opencode.mjs');
+      const env = {
+        ...process.env,
+        OPENCODE_NPX_PKG: 'this-should-not-be-used',
+        OPENCODE_INPUT_CAPTURE: inputCaptureFile,
+        PATH: `${fakeBin}${path.delimiter}${process.env.PATH || ''}`,
+      };
+
+      const res = spawnSync(process.execPath, [runnerPath, '--change', changeName, '--count', '3'], {
+        cwd: tmpRoot,
+        env,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+
+      // Fake opencode exits 0 but makes no progress, so the runner should refuse to continue.
+      assert.strictEqual(res.status, 3, `Runner should exit 3 when no tasks were marked done. stderr=\n${res.stderr}`);
+      assert.ok(await pathExists(inputCaptureFile), 'Expected fake opencode to capture stdin prompt');
+
+      const captured = await fs.readFile(inputCaptureFile, 'utf8');
+      const ids = parseTaskIdsFromRunnerPrompt(captured);
+      assert.deepStrictEqual(ids, ['1.1', '1.2'], 'Runner should stop batching at the parent boundary');
+
+      assert.ok(
+        !captured.includes('## Other Section'),
+        'Runner prompt task details should not leak subsequent section headers'
+      );
+    } finally {
+      await fs.rm(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
   test('Invalid --count values fail fast with exit code 64 and do not start the loop', async () => {
     const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'openspec-vscode-runner-'));
 

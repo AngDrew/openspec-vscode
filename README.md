@@ -11,7 +11,7 @@ Spec-driven development inside VS Code, powered by OpenSpec + OpenCode.
 - Browse `openspec/changes/*` and `openspec/specs/*` from the Activity Bar
 - Read `proposal.md`, `design.md`, and `tasks.md` in a focused details webview
 - Fast-forward scaffold-only changes into full artifacts
-- Apply tasks via the Ralph loop (batching supported with `--count`)
+- Apply tasks via the Ralph loop (batching supported with `--count`, bounded to the same parent task section)
 - Monitor runs live at `http://localhost:4099`
 
 Note: this extension is built for OpenCode. Other agentic CLIs/runners (Claude Code, Codex CLI, Gemini CLI, etc.) are not supported.
@@ -79,7 +79,7 @@ opencode serve --port 4099 --print-logs
 
 4. Create/spec a change: run `OpenSpec: New Change (OpenCode)` (plan mode first).
 5. Fast-forward artifacts: click `Fast-Forward Change` on scaffold-only changes.
-6. Apply tasks: click `Apply Change` and enter how many tasks to include per OpenCode run (batch size; default 1).
+6. Apply tasks: click `Apply Change` and enter how many tasks to include per OpenCode run (batch size within the same parent task section; default 1).
 7. Monitor: run `OpenSpec: Open OpenCode UI` or open `http://localhost:4099`.
 
 ## Apply Change (Ralph loop)
@@ -97,6 +97,8 @@ node ralph_opencode.mjs --attach http://localhost:4099 --change your-change-id [
 ```
 
 `--count <n>` includes up to `n` tasks per `opencode run` iteration (default: `1`).
+
+Batching is bounded to the parent section of the first task id in the batch (e.g. `2.2` can batch `2.3`, but not `3.1`), so a run may include fewer than `n` tasks at a parent boundary.
 
 ## Fast-forward scaffold-only changes
 

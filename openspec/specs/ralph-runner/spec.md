@@ -34,6 +34,8 @@ The runner SHALL:
 #### Scenario: Includes up to N tasks per iteration
 - **WHEN** the runner is invoked with `--count 3`
 - **THEN** each `opencode run` iteration includes up to 3 unchecked tasks in the prompt
+- **AND** batching MUST be bounded to the parent section of the first task id in the batch (e.g. `2.2` can batch `2.3` but not `3.1`)
+- **AND** the iteration MAY include fewer than `N` tasks when the next unchecked task is in a different parent section
 
 #### Scenario: Default count is 1
 - **WHEN** the runner is invoked without `--count`

@@ -12,7 +12,9 @@ The runner SHALL accept a `--count <n>` flag that controls how many tasks it pro
 
 #### Scenario: Runs up to N tasks
 - **WHEN** the runner is invoked with `--count 3`
-- **THEN** each `opencode run` iteration includes up to 3 unchecked tasks in the prompt (or fewer if fewer tasks remain)
+- **THEN** each `opencode run` iteration includes up to 3 unchecked tasks in the prompt
+- **AND** batching MUST stop at the parent boundary of the first task id in the batch (e.g. `2.2` can batch `2.3` but not `3.1`)
+- **AND** the iteration MAY include fewer than `N` tasks when the next unchecked task is in a different parent section
 
 #### Scenario: Count does not change MAX_ITERS loop behavior
 - **WHEN** the runner is invoked with `--count 3`

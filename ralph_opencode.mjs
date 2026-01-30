@@ -243,10 +243,24 @@ function findNextUncheckedTaskIds(tasksText, limit) {
   if (safeLimit <= 0) return [];
 
   const out = [];
+  let parent = '';
   const re = /^- \[ \] ([0-9]+(\.[0-9]+)*)([\s]|$)/gm;
   let m;
   while ((m = re.exec(tasksText)) !== null) {
-    out.push(m[1]);
+    const id = m[1];
+    if (out.length === 0) {
+      parent = String(id).split('.')[0] || '';
+      out.push(id);
+      if (out.length >= safeLimit) break;
+      continue;
+    }
+
+    const nextParent = String(id).split('.')[0] || '';
+    if (nextParent !== parent) {
+      break;
+    }
+
+    out.push(id);
     if (out.length >= safeLimit) break;
   }
   return out;
@@ -302,6 +316,12 @@ function extractTaskBlock(tasksText, tid) {
   const block = [];
   for (const line of lines) {
     if (inBlock && isTaskLine(line) && !startRe.test(line)) {
+      break;
+    }
+    // Stop at the next section header (task sections are typically delineated with `## ...`).
+    // This prevents leaking subsequent section headings into the previous task's extracted block.
+    // Note: headers nested within a task's details should be indented, so they won't match /^##\s/.
+    if (inBlock && /^##\s/.test(line)) {
       break;
     }
     if (!inBlock && startRe.test(line)) {
@@ -385,7 +405,6 @@ for (let iter = 1; iter <= maxItersSafe; iter++) {
   const prompt =
     `Target change: ${changeName}\n` +
     `Tasks file: ${tasksFile}\n` +
-    `Complete tasks in order, up to ${batchIds.length} task(s) (this run).\n` +
     `Task IDs (complete in order):\n` +
     batchIds.map(id => `- ${id}`).join('\n') +
     `\n\n` +
@@ -395,9 +414,9 @@ for (let iter = 1; iter <= maxItersSafe; iter++) {
     `Rules:\n` +
     `- Only implement work for the task IDs listed above\n` +
     `- Do NOT start, modify, or check off any other task ids\n` +
-    `- If it is a test/qa/review and it fail, fix it\n` +
+    `- If it is a lint/test/qa/review and it fail, fix it\n` +
     `- As you finish each task, mark it done in ${tasksFile} by changing:\n` +
-    `  - [ ] <id>  ->  - [x] <id>\n`;
+    `- [ ] <id> -> - [x] <id>\n`;
 
   const runRes = runOpencodeWithFallback(opencodeArgs, prompt);
   if (runRes.error) {
