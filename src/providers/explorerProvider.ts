@@ -169,16 +169,18 @@ export class OpenSpecExplorerProvider implements vscode.TreeDataProvider<TreeIte
 
       const changePath = path.join(changesDir, changeName);
       const isScaffoldOnly = await WorkspaceUtils.isScaffoldOnlyActiveChange(changePath);
+      const hasNoTasks = await WorkspaceUtils.hasNoTasks(changePath);
 
       items.push({
         id: `change-${changeName}`,
         label: changeName,
         type: 'change',
         path: changePath,
-        contextValue: isScaffoldOnly ? 'change:active:scaffold' : 'change:active',
+        contextValue: hasNoTasks ? 'change:active:no-tasks' : 'change:active',
         metadata: {
           isActive: true,
           isScaffoldOnly,
+          hasNoTasks,
           status: 'in-progress'
         }
       });

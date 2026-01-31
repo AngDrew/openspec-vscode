@@ -2,7 +2,7 @@
   "name": "openspec-vscode",
   "displayName": "OpenSpecCodeExplorer",
   "description": "VS Code extension for OpenSpec spec-driven development workflow",
-  "version": "1.2.4",
+  "version": "1.2.5",
   "publisher": "AngDrew",
   "repository": {
     "type": "git",
@@ -140,12 +140,12 @@
         },
         {
           "command": "openspec.ffChange",
-          "when": "view == openspecExplorer && viewItem == change:active:scaffold",
+          "when": "view == openspecExplorer && viewItem == change:active:no-tasks",
           "group": "inline"
         },
         {
           "command": "openspec.archiveChange",
-          "when": "view == openspecExplorer && (viewItem == change:active || viewItem == change:active:scaffold)",
+          "when": "view == openspecExplorer && (viewItem == change:active || viewItem == change:active:no-tasks)",
           "group": "inline"
         }
       ]

@@ -116,6 +116,19 @@ export class WorkspaceUtils {
     }
   }
 
+  static async hasNoTasks(changeDir: string): Promise<boolean> {
+    // Returns true if tasks.md does not exist in the change directory.
+    // Fast-forward is available when there are no tasks yet.
+    try {
+      const tasksPath = path.join(changeDir, 'tasks.md');
+      const hasTasks = await this.fileExists(tasksPath);
+      return !hasTasks;
+    } catch (error) {
+      ErrorHandler.debug(`Failed to check tasks.md in ${changeDir}: ${error}`);
+      return true; // Assume no tasks if we can't check
+    }
+  }
+
   static async isPortOpen(host: string, port: number, timeoutMs: number = 350): Promise<boolean> {
     return await new Promise((resolve) => {
       const socket = new net.Socket();

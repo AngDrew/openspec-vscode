@@ -34,6 +34,7 @@ export interface TreeItemData {
   metadata?: {
     isActive?: boolean;
     isScaffoldOnly?: boolean;
+    hasNoTasks?: boolean;
     requirementCount?: number;
     status?: string;
   };

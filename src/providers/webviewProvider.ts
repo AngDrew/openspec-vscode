@@ -220,13 +220,13 @@ export class OpenSpecWebviewProvider implements vscode.WebviewPanelSerializer {
   private renderEmptyStatePanel(item: TreeItemData): string {
     const changeId = item.type === 'change' ? item.label : '';
     const isActive = item.metadata?.isActive === true;
-    const isScaffoldOnly = item.metadata?.isScaffoldOnly === true;
-    const actionLabel = (isActive && isScaffoldOnly) ? 'Fast-forward artifacts' : 'Attach to OpenCode';
-    const actionTooltip = (isActive && isScaffoldOnly)
+    const hasNoTasks = item.metadata?.hasNoTasks === true;
+    const actionLabel = (isActive && hasNoTasks) ? 'Fast-forward artifacts' : 'Attach to OpenCode';
+    const actionTooltip = (isActive && hasNoTasks)
       ? `Fast-forward: populate ${changeId}`
       : 'Attach to OpenCode at http://localhost:4099';
-    const actionIcon = (isActive && isScaffoldOnly) ? '&gt;&gt;' : '&gt;';
-    const hint = (isActive && isScaffoldOnly)
+    const actionIcon = (isActive && hasNoTasks) ? '&gt;&gt;' : '&gt;';
+    const hint = (isActive && hasNoTasks)
       ? `Runs: opencode run --attach localhost:4099 --continue "use openspec ff skill to populate ${changeId}"`
       : 'Runs the bundled Ralph runner (no workspace files created)';
 
@@ -238,7 +238,7 @@ export class OpenSpecWebviewProvider implements vscode.WebviewPanelSerializer {
           <button
             type="button"
             class="cta-button"
-            ${isActive && isScaffoldOnly
+            ${isActive && hasNoTasks
               ? `data-openspec-ff-change="${this.escapeAttr(changeId)}"`
               : 'data-opencode-attach="http://localhost:4099"'}
             aria-label="${this.escapeAttr(actionTooltip)}"

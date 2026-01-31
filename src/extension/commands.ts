@@ -136,9 +136,9 @@ export function registerCommands(context: vscode.ExtensionContext, runtime: Exte
       return;
     }
 
-    const isScaffoldOnly = await WorkspaceUtils.isScaffoldOnlyActiveChange(item.path);
-    if (!isScaffoldOnly) {
-      vscode.window.showWarningMessage('Fast-forward is only available when the change contains only .openspec.yaml');
+    const hasNoTasks = item?.metadata?.hasNoTasks === true;
+    if (!hasNoTasks) {
+      vscode.window.showWarningMessage('Fast-forward is only available when there are no tasks yet');
       return;
     }
 
