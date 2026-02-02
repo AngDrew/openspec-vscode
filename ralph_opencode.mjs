@@ -4,9 +4,24 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
+import * as readline from 'readline';
 
-function die(message, code = 1) {
+function pauseBeforeExit() {
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+    rl.question('Press Enter to exit...', () => {
+      rl.close();
+      resolve(undefined);
+    });
+  });
+}
+
+async function die(message, code = 1) {
   process.stderr.write(`${message}\n`);
+  await pauseBeforeExit();
   process.exit(code);
 }
 
@@ -131,22 +146,22 @@ function runOpencodeWithFallback(opencodeArgs, input) {
   return viaNpx;
 }
 
-function parseArgs(argv) {
+async function parseArgs(argv) {
   const out = {
     attachUrl: process.env.OPENCODE_ATTACH_URL || process.env.ATTACH_URL || '',
     changeName: process.env.OPENSPEC_CHANGE || '',
     count: 1,
   };
 
-  function parseCountValue(raw) {
+  async function parseCountValue(raw) {
     const s = String(raw ?? '').trim();
     // Require a strict base-10 integer (no decimals, no exponent, no sign).
     if (!/^[0-9]+$/.test(s)) {
-      die('ERROR: --count must be an integer >= 1', 64);
+      await die('ERROR: --count must be an integer >= 1', 64);
     }
     const n = Number.parseInt(s, 10);
     if (!Number.isFinite(n) || n < 1) {
-      die('ERROR: --count must be an integer >= 1', 64);
+      await die('ERROR: --count must be an integer >= 1', 64);
     }
     return n;
   }
@@ -156,7 +171,7 @@ function parseArgs(argv) {
     const a = args[0];
     if (a === '--attach') {
       if (args.length < 2 || !args[1]) {
-        die('ERROR: --attach requires a URL argument', 64);
+        await die('ERROR: --attach requires a URL argument', 64);
       }
       out.attachUrl = args[1];
       args.splice(0, 2);
@@ -169,7 +184,7 @@ function parseArgs(argv) {
     }
     if (a === '--change') {
       if (args.length < 2 || !args[1]) {
-        die('ERROR: --change requires a change id argument', 64);
+        await die('ERROR: --change requires a change id argument', 64);
       }
       out.changeName = args[1];
       args.splice(0, 2);
@@ -182,14 +197,14 @@ function parseArgs(argv) {
     }
     if (a === '--count') {
       if (args.length < 2 || !args[1]) {
-        die('ERROR: --count requires an integer argument', 64);
+        await die('ERROR: --count requires an integer argument', 64);
       }
-      out.count = parseCountValue(args[1]);
+      out.count = await parseCountValue(args[1]);
       args.splice(0, 2);
       continue;
     }
     if (a.startsWith('--count=')) {
-      out.count = parseCountValue(a.slice('--count='.length));
+      out.count = await parseCountValue(a.slice('--count='.length));
       args.splice(0, 1);
       continue;
     }
@@ -198,7 +213,7 @@ function parseArgs(argv) {
       process.exit(0);
     }
 
-    die(`ERROR: Unknown argument: ${a}`, 64);
+    await die(`ERROR: Unknown argument: ${a}`, 64);
   }
 
   return out;
@@ -336,7 +351,8 @@ function extractTaskBlock(tasksText, tid) {
   return out;
 }
 
-const { attachUrl, changeName: changeNameArg, count: tasksPerRun } = parseArgs(process.argv.slice(2));
+(async () => {
+const { attachUrl, changeName: changeNameArg, count: tasksPerRun } = await parseArgs(process.argv.slice(2));
 const maxIters = Number.parseInt(process.env.MAX_ITERS || '30', 10);
 const maxItersSafe = Number.isFinite(maxIters) && maxIters > 0 ? maxIters : 30;
 
@@ -344,21 +360,21 @@ let changeName = (changeNameArg || '').trim();
 if (!changeName) {
   const listRes = runCapture('openspec', ['list']);
   if (listRes.error) {
-    die(`ERROR: Failed to run openspec list: ${String(listRes.error)}`);
+    await die(`ERROR: Failed to run openspec list: ${String(listRes.error)}`);
   }
   if (listRes.status !== 0) {
-    die('ERROR: Could not determine CHANGE_NAME from: openspec list');
+    await die('ERROR: Could not determine CHANGE_NAME from: openspec list');
   }
 
   changeName = pickFirstChangeNameFromOpenSpecList(listRes.stdout);
   if (!changeName) {
-    die('ERROR: Could not determine CHANGE_NAME from: openspec list');
+    await die('ERROR: Could not determine CHANGE_NAME from: openspec list');
   }
 }
 
 const tasksFile = path.join('openspec', 'changes', changeName, 'tasks.md');
 if (!fs.existsSync(tasksFile)) {
-  die(`ERROR: tasks file not found: ${tasksFile}`);
+  await die(`ERROR: tasks file not found: ${tasksFile}`);
 }
 
 process.stdout.write(`Change     : ${changeName}\n`);
@@ -379,7 +395,7 @@ for (let iter = 1; iter <= maxItersSafe; iter++) {
 
   const batchIds = findNextUncheckedTaskIds(tasksTextBefore, tasksPerRun);
   if (!batchIds || batchIds.length === 0) {
-    die(`ERROR: Could not find next unchecked task(s) in ${tasksFile}`, 2);
+    await die(`ERROR: Could not find next unchecked task(s) in ${tasksFile}`, 2);
   }
 
   const firstId = batchIds[0];
@@ -391,7 +407,7 @@ for (let iter = 1; iter <= maxItersSafe; iter++) {
   for (const id of batchIds) {
     const block = extractTaskBlock(tasksTextBefore, id);
     if (!block) {
-      die(`ERROR: Could not extract task block for task ${id} from ${tasksFile}`, 2);
+      await die(`ERROR: Could not extract task block for task ${id} from ${tasksFile}`, 2);
     }
     blocks.push(block);
   }
@@ -414,6 +430,7 @@ for (let iter = 1; iter <= maxItersSafe; iter++) {
     `Rules:\n` +
     `- Only implement work for the task IDs listed above\n` +
     `- Do NOT start, modify, or check off any other task ids\n` +
+    `- You may check previous tasks to get context about the current task(s) context\n` +
     `- If it is a lint/test/qa/review and it fail, fix it\n` +
     `- As you finish each task, mark it done in ${tasksFile} by changing:\n` +
     `- [ ] <id> -> - [x] <id>\n`;
@@ -421,7 +438,7 @@ for (let iter = 1; iter <= maxItersSafe; iter++) {
   const runRes = runOpencodeWithFallback(opencodeArgs, prompt);
   if (runRes.error) {
     if (isNotFound(runRes.error)) {
-      die(
+      await die(
         'ERROR: opencode command not found (ENOENT).\n' +
         'Install opencode and ensure it is on PATH, then restart your terminal.\n' +
         'Tip: this runner will also try `npx -y opencode-ai@1.1.44` as a fallback if available.\n' +
@@ -429,16 +446,16 @@ for (let iter = 1; iter <= maxItersSafe; iter++) {
         127
       );
     }
-    die(`ERROR: Failed to run opencode: ${String(runRes.error)}`);
+    await die(`ERROR: Failed to run opencode: ${String(runRes.error)}`);
   }
   if (runRes.status !== 0) {
-    die(`ERROR: opencode exited with status ${String(runRes.status)}`);
+    await die(`ERROR: opencode exited with status ${String(runRes.status)}`);
   }
 
   const tasksTextAfter = fs.readFileSync(tasksFile, 'utf8');
   const completedIds = countNewlyCompletedIds(tasksTextBefore, tasksTextAfter, batchIds);
   if (completedIds.length === 0) {
-    die(
+    await die(
       `None of the requested tasks were marked done in ${tasksFile} after iteration ${iter}.\n` +
         `Requested (in order): ${batchIds.join(', ')}\n` +
         'Refusing to continue to avoid looping blindly.',
@@ -447,7 +464,7 @@ for (let iter = 1; iter <= maxItersSafe; iter++) {
   }
 
   if (!isPrefix(completedIds, batchIds)) {
-    die(
+    await die(
       `Tasks were checked off out of order after iteration ${iter}.\n` +
         `Requested (in order): ${batchIds.join(', ')}\n` +
         `Completed: ${completedIds.join(', ')}\n` +
@@ -472,3 +489,4 @@ if (allDone(tasksTextAfterLoop)) {
 
 process.stdout.write(`Hit MAX_ITERS=${maxItersSafe} but tasks still remain unfinished.\n`);
 process.exit(4);
+})();
