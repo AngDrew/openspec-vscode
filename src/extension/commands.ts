@@ -71,6 +71,47 @@ export function registerCommands(context: vscode.ExtensionContext, runtime: Exte
       return;
     }
 
+    // Check tasks.md format before proceeding
+    if (typeof item.path === 'string') {
+      try {
+        const validation = await WorkspaceUtils.validateTasksFormat(item.path);
+
+        if (!validation.isValid) {
+          // Tasks file exists but format is invalid or has no valid tasks
+          const changeId = item.label;
+          const terminalName = `OpenSpec Fix Format: ${changeId}`;
+          const terminal = vscode.window.createTerminal({ name: terminalName });
+          terminal.show(true);
+
+          const fixPrompt =
+            `The tasks.md file at openspec/changes/${changeId}/tasks.md has an incompatible format or contains no valid tasks. ` +
+            'Please convert it to the OpenSpec standard format:\n\n' +
+            'FORMAT TEMPLATE:\n' +
+            '## 1. [Section Title]\n\n' +
+            '- [x] 1.1 [First task description]\n' +
+            '- [ ] 1.2 [Second task description]\n' +
+            '- [ ] 1.3 [Completed task description]\n\n' +
+            '## 2. [Another Section]\n\n' +
+            '- [ ] 2.1 [Task description]\n' +
+            '- [ ] 2.2 [Task description]\n\n' +
+            'RULES:\n' +
+            '- Use section headers: "## [number]. [Title]" (e.g., "## 1. Runner CLI")\n' +
+            '- Use checkbox format: "- [ ] [id] [description]" for pending, "- [x] [id] [description]" for completed\n' +
+            '- Task IDs must follow hierarchical numbering: 1.1, 1.2, 2.1, 2.2, etc.\n' +
+            '- One blank line between sections\n' +
+            '- Preserve ALL original task content and meaning—only restructure the format\n' +
+            '- Do not add, remove, or modify the substance of any task\n\n' +
+            `Please read the file at openspec/changes/${changeId}/tasks.md and rewrite it in this format.`;
+
+          terminal.sendText(`opencode --prompt ${JSON.stringify(fixPrompt)}`, true);
+          return; // Exit without proceeding to ralph_opencode.mjs
+        }
+      } catch (error) {
+        ErrorHandler.handle(error as Error, 'Failed to validate tasks format', true);
+        // Continue anyway - let the runner handle any issues
+      }
+    }
+
     try {
       const tasksPerRun = await vscode.window.showInputBox({
         title: 'OpenSpec: Apply Change',

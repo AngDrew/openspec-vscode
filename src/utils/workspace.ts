@@ -129,6 +129,50 @@ export class WorkspaceUtils {
     }
   }
 
+  static async validateTasksFormat(changeDir: string): Promise<{
+    hasTasksFile: boolean;
+    isValid: boolean;
+    taskCount: number;
+    error?: string;
+  }> {
+    try {
+      const tasksPath = path.join(changeDir, 'tasks.md');
+      const hasTasksFile = await this.fileExists(tasksPath);
+
+      if (!hasTasksFile) {
+        return { hasTasksFile: false, isValid: false, taskCount: 0, error: 'tasks.md not found' };
+      }
+
+      const content = await this.readFile(tasksPath);
+
+      // Check for valid task lines: - [ ] 1.1 Task or - [x] 1.1 Task
+      // Pattern: checkbox marker, space, numeric ID (e.g., 1.1, 1.2.1), space, content
+      const taskPattern = /^- \[[ x]\] [0-9]+(\.[0-9]+)*\s/gm;
+      const matches = content.match(taskPattern);
+      const taskCount = matches ? matches.length : 0;
+
+      if (taskCount === 0) {
+        return {
+          hasTasksFile: true,
+          isValid: false,
+          taskCount: 0,
+          error: 'No valid task entries found (expected format: "- [ ] 1.1 Task description")'
+        };
+      }
+
+      return { hasTasksFile: true, isValid: true, taskCount };
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      ErrorHandler.debug(`Failed to validate tasks format in ${changeDir}: ${errorMsg}`);
+      return {
+        hasTasksFile: false,
+        isValid: false,
+        taskCount: 0,
+        error: `Failed to read tasks.md: ${errorMsg}`
+      };
+    }
+  }
+
   static async isPortOpen(host: string, port: number, timeoutMs: number = 350): Promise<boolean> {
     return await new Promise((resolve) => {
       const socket = new net.Socket();
