@@ -6,6 +6,8 @@
 
 ![OpenSpec icon](media/openspec-icon.png)
 
+> **DEPRECATION NOTICE:** This VS Code extension is being migrated to an OpenCode plugin. The new `opencode-openspec` plugin provides the same OpenSpec functionality directly within OpenCode, eliminating the need for a separate VS Code extension. See the [opencode-openspec](https://github.com/anomalyco/opencode-openspec) repository for the new plugin.
+
 Spec-driven development inside VS Code, powered by OpenSpec + OpenCode.
 
 - Browse `openspec/changes/*` and `openspec/specs/*` from the Activity Bar

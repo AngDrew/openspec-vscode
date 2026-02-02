@@ -13,9 +13,10 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   },
-  "exclude": [
+"exclude": [
     "node_modules",
     ".vscode-test",
-    "test"
+    "test",
+    "opencode-openspec"
   ]
 }
