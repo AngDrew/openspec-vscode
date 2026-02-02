@@ -7,8 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-02-02
+
 ### Added
-- Runner script now pauses on errors with "Press Enter to exit..." prompt, giving users time to debug or report issues before the terminal closes.
+- Added workspace helpers for OpenSpec directories (utils/workspace.ts) including OpenSpec directory detection, file caching, and OpenCode port availability checks.
 
 ## [1.2.6] - 2026-02-02
 
@@ -96,6 +98,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - OpenCode server controls and "open UI" integration.
 
 [Unreleased]: https://github.com/AngDrew/openspec-vscode/compare/v1.2.6...HEAD
+[1.3.0]: https://github.com/AngDrew/openspec-vscode/compare/v1.2.6...v1.3.0
 [1.2.6]: https://github.com/AngDrew/openspec-vscode/compare/v1.2.5...v1.2.6
 [1.2.5]: https://github.com/AngDrew/openspec-vscode/compare/v1.2.4...v1.2.5
 [1.2.4]: https://github.com/AngDrew/openspec-vscode/compare/v1.2.3...v1.2.4
