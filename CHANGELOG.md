@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Runner script now pauses on errors with "Press Enter to exit..." prompt, giving users time to debug or report issues before the terminal closes.
+
+## [1.2.6] - 2026-02-02
+
 ### Fixed
 - Fast-forward button now appears when there is no `tasks.md` file in the change folder, regardless of whether other artifacts exist.
 
@@ -90,7 +95,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Commands to apply, fast-forward, and archive changes.
 - OpenCode server controls and "open UI" integration.
 
-[Unreleased]: https://github.com/AngDrew/openspec-vscode/compare/v1.2.5...HEAD
+[Unreleased]: https://github.com/AngDrew/openspec-vscode/compare/v1.2.6...HEAD
+[1.2.6]: https://github.com/AngDrew/openspec-vscode/compare/v1.2.5...v1.2.6
 [1.2.5]: https://github.com/AngDrew/openspec-vscode/compare/v1.2.4...v1.2.5
 [1.2.4]: https://github.com/AngDrew/openspec-vscode/compare/v1.2.3...v1.2.4
 [1.2.3]: https://github.com/AngDrew/openspec-vscode/compare/v1.2.2...v1.2.3
