@@ -134,7 +134,6 @@ This guide helps you resolve common issues with the OpenSpec VS Code extension.
 
 2. **Manual backup:**
    - Export chat before reloading if needed
-   - Use `/status` command to check session info
 
 ---
 
@@ -190,7 +189,7 @@ This guide helps you resolve common issues with the OpenSpec VS Code extension.
 ### Apply command fails
 
 **Symptoms:**
-- `/apply` command returns error
+- Apply action returns error
 - Ralph loop doesn't start
 - Tasks not being processed
 
@@ -205,7 +204,6 @@ This guide helps you resolve common issues with the OpenSpec VS Code extension.
    - Check file permissions (executable)
 
 3. **Verify change ID:**
-   - Use `/status` to see current change
    - Ensure you're in the right change context
 
 4. **Check task format:**
@@ -215,7 +213,7 @@ This guide helps you resolve common issues with the OpenSpec VS Code extension.
 ### Fast-forward doesn't work
 
 **Symptoms:**
-- `/ff` command does nothing
+- Fast-Forward action does nothing
 - "No scaffold-only changes found"
 - Artifacts not generated
 
@@ -226,8 +224,7 @@ This guide helps you resolve common issues with the OpenSpec VS Code extension.
    - Change must have only `.openspec.yaml` (no tasks.md)
 
 2. **Verify OpenCode session:**
-   - Must have active session from `/new`
-   - Check `/status` for session info
+   - Must have active session from New Change
 
 3. **Check server logs:**
    - Look for errors in OpenCode Server terminal
@@ -363,9 +360,9 @@ This outputs structured JSON logs to the Output panel for easier debugging.
 | "Port 4099 is already in use" | Another process using port | Kill process or use different port |
 | "Failed to start OpenCode server" | opencode not installed or error | Install opencode, check terminal output |
 | "Connection refused" | Server not running | Start server first |
-| "No scaffold-only changes found" | Change already has tasks.md | Use `/apply` instead of `/ff` |
+| "No scaffold-only changes found" | Change already has tasks.md | Use Apply instead of Fast-Forward |
 | "Command not found" | Extension not activated | Check workspace has openspec/ folder |
-| "Session expired" | Session timeout or server restart | Start new session with `/new` |
+| "Session expired" | Session timeout or server restart | Start a new session with New Change |
 
 ---
 

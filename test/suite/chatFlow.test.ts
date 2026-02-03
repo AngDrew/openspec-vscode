@@ -1,29 +1,21 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
-import * as path from 'path';
-import { ChatProvider, ChatMessage, ChatSession } from '../../src/providers/chatProvider';
-import { SessionManager, ConversationSession, ChatMessage as SessionChatMessage } from '../../src/services/sessionManager';
+import { SessionManager } from '../../src/services/sessionManager';
 import { AcpClient } from '../../src/services/acpClient';
 import { ServerLifecycle } from '../../src/services/serverLifecycle';
-import { PortManager } from '../../src/services/portManager';
 
 suite('End-to-End Chat Flow Integration Test Suite', () => {
-  let chatProvider: ChatProvider;
   let sessionManager: SessionManager;
   let acpClient: AcpClient;
   let serverLifecycle: ServerLifecycle;
-  let portManager: PortManager;
   let mockContext: vscode.ExtensionContext;
   let globalState: Map<string, any>;
-  const testExtensionUri = vscode.Uri.file(path.join(__dirname, '../../../'));
 
   setup(() => {
     // Initialize services
-    chatProvider = new ChatProvider(testExtensionUri);
     sessionManager = SessionManager.getInstance();
     acpClient = AcpClient.getInstance();
     serverLifecycle = ServerLifecycle.getInstance();
-    portManager = PortManager.getInstance();
 
     // Create mock extension context
     globalState = new Map<string, any>();
@@ -49,36 +41,12 @@ suite('End-to-End Chat Flow Integration Test Suite', () => {
     // Initialize session manager
     sessionManager.initialize(mockContext);
 
-    // Reset singleton states
-    acpClient['isConnected'] = false;
-    acpClient['requestId'] = 0;
-    acpClient['pendingRequests'].clear();
-    acpClient['messageListeners'] = [];
-    acpClient['connectionListeners'] = [];
-    acpClient['toolCallListeners'] = [];
-    acpClient['responseListeners'] = [];
-    acpClient['activeToolCalls'].clear();
-    acpClient['currentResponseBuffer'] = '';
-    acpClient['currentResponse'] = undefined;
-    acpClient['abortController'] = undefined;
-    acpClient['activeStreamMessageId'] = undefined;
-    acpClient['sseReconnectAttempts'] = 0;
     acpClient['messageQueue'] = [];
     acpClient['offlineState'] = { isOffline: false, pendingMessageCount: 0 };
     acpClient['offlineListeners'] = [];
-
-    if (acpClient['sseReconnectTimer']) {
-      clearTimeout(acpClient['sseReconnectTimer']);
-      acpClient['sseReconnectTimer'] = undefined;
-    }
-    if (acpClient['offlineRetryTimer']) {
-      clearInterval(acpClient['offlineRetryTimer']);
-      acpClient['offlineRetryTimer'] = undefined;
-    }
   });
 
   teardown(async () => {
-    chatProvider.dispose();
     sessionManager.dispose();
     acpClient.dispose();
     serverLifecycle.dispose();
@@ -123,14 +91,14 @@ suite('End-to-End Chat Flow Integration Test Suite', () => {
     assert.strictEqual(storedSession.phase, 'drafting', 'Phase should be persisted');
   });
 
-  test('Chat flow with ChatProvider integration', async () => {
+  test('Chat flow with session manager integration', async () => {
     // Step 1: Create session via SessionManager
-    const session = await sessionManager.createSession('chat-provider-test');
+    await sessionManager.createSession('chat-provider-test');
 
     // Step 2: Add messages through SessionManager
     await sessionManager.addMessage({
       role: 'user',
-      content: '/status'
+      content: 'status'
     });
 
     // Step 3: Verify session state
@@ -176,32 +144,6 @@ suite('End-to-End Chat Flow Integration Test Suite', () => {
     assert.ok(finalMessage!.content.includes('const x = 1;'), 'Should contain the code');
   });
 
-  test('Chat flow with tool calls', async () => {
-    await sessionManager.createSession('tool-call-test');
-
-    // Add user message
-    await sessionManager.addMessage({
-      role: 'user',
-      content: 'Read a file for me'
-    });
-
-    // Add assistant message with tool call
-    const messageWithTool = await sessionManager.addMessage({
-      role: 'assistant',
-      content: 'I will read the file for you.',
-      toolCalls: [{
-        id: 'tool-1',
-        tool: 'read_file',
-        params: { path: '/test/file.txt' },
-        status: 'running',
-        startTime: Date.now()
-      }]
-    });
-
-    assert.ok(messageWithTool.toolCalls, 'Message should have tool calls');
-    assert.strictEqual(messageWithTool.toolCalls!.length, 1, 'Should have 1 tool call');
-    assert.strictEqual(messageWithTool.toolCalls![0].tool, 'read_file', 'Should be read_file tool');
-  });
 
   test('Multiple sessions in chat flow', async () => {
     // Create first session

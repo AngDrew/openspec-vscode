@@ -9,13 +9,7 @@
   const emptyState = document.getElementById('emptyState');
   const typingIndicator = document.getElementById('typingIndicator');
   const cancelBtn = document.getElementById('cancelBtn');
-  const toolCallsPanel = document.getElementById('toolCallsPanel');
-  const toolCallsHeader = document.getElementById('toolCallsHeader');
-  const toolCallsToggle = document.getElementById('toolCallsToggle');
-  const toolCallsContent = document.getElementById('toolCallsContent');
-  const toolCallsList = document.getElementById('toolCallsList');
-  const toolCallsEmpty = document.getElementById('toolCallsEmpty');
-  const toolCallsCount = document.getElementById('toolCallsCount');
+  const connectionStatus = document.getElementById('connectionStatus');
   const phaseTracker = document.getElementById('phaseTracker');
   const phaseTrackerContainer = document.getElementById('phaseTrackerContainer');
   const connectionErrorBanner = document.getElementById('connectionErrorBanner');
@@ -32,8 +26,6 @@
   let isUserScrolling = false;
   let scrollTimeout = null;
   let isStreaming = false;
-  let toolCalls = [];
-  let isToolCallsCollapsed = false;
   let currentPhases = [];
   let currentPhaseId = null;
 
@@ -67,136 +59,12 @@
   };
   const VIRTUAL_SCROLL_THRESHOLD = 50; // Enable virtual scrolling after 50 messages
 
-  // Script output state
-  let scriptOutputLines = [];
-  let scriptOutputContainer = null;
-
   // Initialize
   function init() {
     setupEventListeners();
     requestSessionData();
     focusInput();
-    createScriptOutputContainer();
-  }
-
-  // Create script output container
-  function createScriptOutputContainer() {
-    scriptOutputContainer = document.createElement('div');
-    scriptOutputContainer.className = 'script-output-container collapsed';
-    scriptOutputContainer.id = 'scriptOutputContainer';
-
-    const header = document.createElement('div');
-    header.className = 'script-output-header';
-    header.innerHTML = `
-      <span class="script-output-title">Script Output</span>
-      <span class="script-output-status" id="scriptOutputStatus">Idle</span>
-      <span class="script-output-toggle">▶</span>
-    `;
-    header.addEventListener('click', toggleScriptOutputPanel);
-
-    const content = document.createElement('div');
-    content.className = 'script-output-content';
-    content.id = 'scriptOutputContent';
-
-    const outputList = document.createElement('div');
-    outputList.className = 'script-output-list';
-    outputList.id = 'scriptOutputList';
-
-    content.appendChild(outputList);
-    scriptOutputContainer.appendChild(header);
-    scriptOutputContainer.appendChild(content);
-
-    // Insert after tool calls panel
-    const toolCallsPanel = document.getElementById('toolCallsPanel');
-    if (toolCallsPanel && toolCallsPanel.parentNode) {
-      toolCallsPanel.parentNode.insertBefore(scriptOutputContainer, toolCallsPanel.nextSibling);
-    } else {
-      // Fallback: insert after messages container
-      const messagesContainer = document.getElementById('messagesContainer');
-      if (messagesContainer && messagesContainer.parentNode) {
-        messagesContainer.parentNode.insertBefore(scriptOutputContainer, messagesContainer);
-      }
-    }
-  }
-
-  // Toggle script output panel
-  function toggleScriptOutputPanel() {
-    if (!scriptOutputContainer) return;
-    scriptOutputContainer.classList.toggle('collapsed');
-    const toggle = scriptOutputContainer.querySelector('.script-output-toggle');
-    if (toggle) {
-      toggle.textContent = scriptOutputContainer.classList.contains('collapsed') ? '▶' : '▼';
-    }
-  }
-
-  // Add script output line
-  function addScriptOutput(output) {
-    if (!scriptOutputContainer) {
-      createScriptOutputContainer();
-    }
-
-    scriptOutputLines.push(output);
-
-    const outputList = document.getElementById('scriptOutputList');
-    if (!outputList) return;
-
-    const lineEl = document.createElement('div');
-    lineEl.className = `script-output-line script-output-${output.type}`;
-
-    const timestamp = document.createElement('span');
-    timestamp.className = 'script-output-timestamp';
-    timestamp.textContent = formatTimestamp(output.timestamp);
-
-    const content = document.createElement('span');
-    content.className = 'script-output-text';
-    content.textContent = output.content;
-
-    lineEl.appendChild(timestamp);
-    lineEl.appendChild(content);
-    outputList.appendChild(lineEl);
-
-    // Auto-scroll to bottom
-    const contentContainer = document.getElementById('scriptOutputContent');
-    if (contentContainer) {
-      contentContainer.scrollTop = contentContainer.scrollHeight;
-    }
-
-    // Auto-expand on first output
-    if (scriptOutputLines.length === 1) {
-      scriptOutputContainer.classList.remove('collapsed');
-      const toggle = scriptOutputContainer.querySelector('.script-output-toggle');
-      if (toggle) {
-        toggle.textContent = '▼';
-      }
-    }
-  }
-
-  // Update script execution status
-  function updateScriptExecutionStatus(status, message) {
-    const statusEl = document.getElementById('scriptOutputStatus');
-    if (!statusEl) return;
-
-    statusEl.className = `script-output-status script-output-status-${status}`;
-    statusEl.textContent = message || status;
-
-    // Auto-expand when running
-    if (status === 'running' && scriptOutputContainer) {
-      scriptOutputContainer.classList.remove('collapsed');
-      const toggle = scriptOutputContainer.querySelector('.script-output-toggle');
-      if (toggle) {
-        toggle.textContent = '▼';
-      }
-    }
-  }
-
-  // Clear script output
-  function clearScriptOutput() {
-    scriptOutputLines = [];
-    const outputList = document.getElementById('scriptOutputList');
-    if (outputList) {
-      outputList.innerHTML = '';
-    }
-    updateScriptExecutionStatus('idle', 'Idle');
+    updateConnectionStatus('disconnected');
   }
 
   // Setup event listeners
@@ -232,11 +100,6 @@
 
     // Track user scrolling to prevent auto-scroll when user is reading history
     messagesContainer.addEventListener('scroll', handleScroll);
-
-    // Tool calls panel toggle
-    if (toolCallsHeader) {
-      toolCallsHeader.addEventListener('click', toggleToolCallsPanel);
-    }
 
     // Phase tracker click handlers
     if (phaseTrackerContainer) {
@@ -369,148 +232,18 @@
     }
   }
 
-  // Toggle tool calls panel collapsed state
-  function toggleToolCallsPanel() {
-    if (!toolCallsPanel) {
+  function updateConnectionStatus(state, port) {
+    if (!connectionStatus) {
       return;
     }
 
-    isToolCallsCollapsed = !isToolCallsCollapsed;
-    toolCallsPanel.classList.toggle('collapsed', isToolCallsCollapsed);
+    const normalizedState = state || 'disconnected';
+    const label = normalizedState === 'connected' ? 'Connected' :
+      normalizedState === 'connecting' ? 'Connecting' : 'Disconnected';
+    const portLabel = port ? `:${port}` : '';
 
-    // Update toggle icon
-    if (toolCallsToggle) {
-      toolCallsToggle.textContent = isToolCallsCollapsed ? '▶' : '▼';
-    }
-  }
-
-  // Add a tool call to the panel
-  function addToolCall(toolCall) {
-    if (!toolCallsList || !toolCallsEmpty || !toolCallsCount) {
-      return;
-    }
-
-    toolCalls.push(toolCall);
-    updateToolCallsCount();
-
-    // Hide empty state
-    toolCallsEmpty.style.display = 'none';
-
-    // Create tool call element
-    const toolCallEl = createToolCallElement(toolCall);
-    toolCallsList.appendChild(toolCallEl);
-
-    // Auto-expand panel on first tool call
-    if (toolCalls.length === 1 && isToolCallsCollapsed) {
-      toggleToolCallsPanel();
-    }
-  }
-
-  // Update tool call status
-  function updateToolCallStatus(toolCallId, status, result) {
-    const toolCallIndex = toolCalls.findIndex(tc => tc.id === toolCallId);
-    if (toolCallIndex === -1) {
-      return;
-    }
-
-    toolCalls[toolCallIndex].status = status;
-    if (result !== undefined) {
-      toolCalls[toolCallIndex].result = result;
-    }
-
-    // Update UI
-    const toolCallEl = document.getElementById(`toolcall-${toolCallId}`);
-    if (toolCallEl) {
-      const statusEl = toolCallEl.querySelector('.tool-call-status');
-      if (statusEl) {
-        statusEl.className = `tool-call-status ${status}`;
-      }
-
-      // Add or update result details
-      let resultDetails = toolCallEl.querySelector('.tool-call-result');
-      if (status === 'completed' && result !== undefined) {
-        if (!resultDetails) {
-          resultDetails = document.createElement('details');
-          resultDetails.className = 'tool-call-details tool-call-result';
-          toolCallEl.appendChild(resultDetails);
-        }
-        resultDetails.style.display = 'block';
-        resultDetails.innerHTML = `<summary>Result</summary><pre>${escapeHtml(JSON.stringify(result, null, 2))}</pre>`;
-      } else if (status === 'failed' && result !== undefined) {
-        if (!resultDetails) {
-          resultDetails = document.createElement('details');
-          resultDetails.className = 'tool-call-details tool-call-result';
-          toolCallEl.appendChild(resultDetails);
-        }
-        resultDetails.style.display = 'block';
-        resultDetails.innerHTML = `<summary>Error</summary><pre class="error-result">${escapeHtml(JSON.stringify(result, null, 2))}</pre>`;
-      }
-    }
-  }
-
-  // Create tool call element
-  function createToolCallElement(toolCall) {
-    const el = document.createElement('div');
-    el.id = `toolcall-${toolCall.id}`;
-    el.className = 'tool-call-item';
-
-    // Create header row with status, name, and time
-    const header = document.createElement('div');
-    header.className = 'tool-call-header';
-
-    const status = document.createElement('span');
-    status.className = `tool-call-status ${toolCall.status || 'pending'}`;
-
-    const name = document.createElement('span');
-    name.className = 'tool-call-name';
-    name.textContent = toolCall.name;
-
-    const time = document.createElement('span');
-    time.className = 'tool-call-time';
-    time.textContent = formatTimestamp(toolCall.timestamp);
-
-    header.appendChild(status);
-    header.appendChild(name);
-    header.appendChild(time);
-    el.appendChild(header);
-
-    // Add parameters details in expandable section
-    if (toolCall.parameters) {
-      const details = document.createElement('details');
-      details.className = 'tool-call-details';
-      details.innerHTML = `<summary>Parameters</summary><pre>${escapeHtml(JSON.stringify(toolCall.parameters, null, 2))}</pre>`;
-      el.appendChild(details);
-    }
-
-    // Add placeholder for result details (will be populated when completed)
-    const resultDetails = document.createElement('details');
-    resultDetails.id = `toolcall-result-${toolCall.id}`;
-    resultDetails.className = 'tool-call-details tool-call-result';
-    resultDetails.style.display = 'none';
-    el.appendChild(resultDetails);
-
-    return el;
-  }
-
-  // Update tool calls count badge
-  function updateToolCallsCount() {
-    if (toolCallsCount) {
-      const count = toolCalls.length;
-      toolCallsCount.textContent = count > 0 ? count.toString() : '';
-      toolCallsCount.setAttribute('data-count', count.toString());
-    }
-  }
-
-  // Clear tool calls
-  function clearToolCalls() {
-    toolCalls = [];
-    if (toolCallsList) {
-      toolCallsList.innerHTML = '';
-    }
-    if (toolCallsEmpty) {
-      toolCallsEmpty.style.display = 'block';
-    }
-    updateToolCallsCount();
+    connectionStatus.textContent = `${label}${portLabel}`;
+    connectionStatus.dataset.state = normalizedState;
   }
 
   // Update phase tracker with new phase data
@@ -646,15 +379,6 @@
           markMessageAsPartial(message.messageId, message.partialContent);
         }
         break;
-      case 'addToolCall':
-        addToolCall(message.toolCall);
-        break;
-      case 'updateToolCall':
-        updateToolCallStatus(message.toolCallId, message.status, message.result);
-        break;
-      case 'clearToolCalls':
-        clearToolCalls();
-        break;
       case 'updatePhaseTracker':
         updatePhaseTracker(message.phases);
         break;
@@ -663,6 +387,9 @@
         break;
       case 'displayArtifact':
         displayArtifact(message.artifact);
+        break;
+      case 'connectionState':
+        updateConnectionStatus(message.state, message.port);
         break;
       case 'offlineState':
         if (message.isOffline) {
@@ -680,17 +407,8 @@
       case 'hideOfflineIndicator':
         hideOfflineIndicator();
         break;
-      case 'scriptOutput':
-        addScriptOutput(message.output);
-        break;
-      case 'scriptExecutionStatus':
-        updateScriptExecutionStatus(message.status, message.message);
-        break;
-      case 'clearScriptOutput':
-        clearScriptOutput();
-        break;
       default:
-        console.log('Unknown message type:', message.type);
+        break;
     }
   }
 

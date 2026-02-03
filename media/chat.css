@@ -448,6 +448,36 @@ body {
   border-bottom: 1px solid var(--chat-border);
 }
 
+.chat-header-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.connection-status {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background-color: var(--vscode-editorWidget-background);
+  border: 1px solid var(--chat-border);
+  color: var(--chat-foreground-muted);
+}
+
+.connection-status[data-state="connected"] {
+  color: var(--vscode-testing-iconPassed, #2ea043);
+  border-color: var(--vscode-testing-iconPassed, #2ea043);
+}
+
+.connection-status[data-state="connecting"] {
+  color: var(--vscode-testing-iconQueued, #d29922);
+  border-color: var(--vscode-testing-iconQueued, #d29922);
+}
+
+.connection-status[data-state="disconnected"] {
+  color: var(--vscode-testing-iconFailed, #d73a49);
+  border-color: var(--vscode-testing-iconFailed, #d73a49);
+}
+
 .chat-header h1 {
   margin: 0;
   font-size: 14px;
@@ -1289,188 +1319,6 @@ body {
   white-space: nowrap;
 }
 
-/* Tool Calls Panel */
-.tool-calls-panel {
-  background-color: var(--chat-header-bg);
-  border-bottom: 1px solid var(--chat-border);
-  flex-shrink: 0;
-}
-
-.tool-calls-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 10px 16px;
-  cursor: pointer;
-  user-select: none;
-  transition: background-color 0.2s ease;
-}
-
-.tool-calls-header:hover {
-  background-color: var(--chat-toolbar-hover);
-}
-
-.tool-calls-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--chat-fg);
-}
-
-.tool-calls-icon {
-  font-size: 14px;
-}
-
-.tool-calls-count {
-  display: none;
-  align-items: center;
-  justify-content: center;
-  min-width: 20px;
-  height: 20px;
-  padding: 0 6px;
-  background-color: var(--vscode-badge-background);
-  color: var(--vscode-badge-foreground);
-  border-radius: 10px;
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.tool-calls-count[data-count]:not([data-count=""]):not([data-count="0"]) {
-  display: inline-flex;
-}
-
-.tool-calls-toggle {
-  font-size: 10px;
-  color: var(--chat-foreground-muted);
-  transition: transform 0.2s ease;
-}
-
-.tool-calls-panel.collapsed .tool-calls-toggle {
-  transform: rotate(-90deg);
-}
-
-.tool-calls-content {
-  max-height: 200px;
-  overflow-y: auto;
-  transition: max-height 0.3s ease, padding 0.3s ease;
-}
-
-.tool-calls-panel.collapsed .tool-calls-content {
-  max-height: 0;
-  overflow: hidden;
-}
-
-.tool-calls-empty {
-  padding: 16px;
-  text-align: center;
-  color: var(--chat-foreground-muted);
-  font-size: 12px;
-  font-style: italic;
-}
-
-.tool-calls-list {
-  padding: 8px 16px;
-}
-
-.tool-call-item {
-  display: flex;
-  flex-direction: column;
-  padding: 8px 12px;
-  margin-bottom: 6px;
-  background-color: var(--chat-bg);
-  border: 1px solid var(--chat-border);
-  border-radius: 6px;
-  font-size: 12px;
-  transition: background-color 0.2s ease;
-}
-
-.tool-call-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-}
-
-.tool-call-item:hover {
-  background-color: var(--vscode-editor-inactiveSelectionBackground);
-}
-
-.tool-call-item:last-child {
-  margin-bottom: 0;
-}
-
-.tool-call-status {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.tool-call-status.pending {
-  background-color: var(--vscode-progressBar-background);
-  animation: pulse 1.5s infinite;
-}
-
-.tool-call-status.running {
-  background-color: var(--vscode-textLink-foreground);
-  animation: pulse 0.8s infinite;
-}
-
-.tool-call-status.completed {
-  background-color: var(--vscode-testing-iconPassed);
-}
-
-.tool-call-status.failed {
-  background-color: var(--vscode-testing-iconFailed);
-}
-
-.tool-call-name {
-  font-weight: 500;
-  color: var(--chat-fg);
-  flex: 1;
-}
-
-.tool-call-time {
-  color: var(--chat-foreground-muted);
-  font-size: 11px;
-}
-
-.tool-call-details {
-  margin-top: 6px;
-  padding: 8px;
-  background-color: var(--vscode-editor-inactiveSelectionBackground);
-  border-radius: 4px;
-  font-family: var(--vscode-editor-font-family);
-  font-size: 11px;
-  overflow-x: auto;
-}
-
-.tool-call-details pre {
-  margin: 0;
-  white-space: pre-wrap;
-  word-wrap: break-word;
-}
-
-.tool-call-details summary {
-  cursor: pointer;
-  color: var(--chat-accent);
-  font-weight: 500;
-}
-
-.tool-call-details summary:hover {
-  color: var(--chat-accent-hover);
-}
-
-.tool-call-result pre.error-result {
-  color: var(--vscode-errorForeground);
-  background-color: var(--vscode-inputValidation-errorBackground);
-  border: 1px solid var(--vscode-inputValidation-errorBorder);
-  border-radius: 4px;
-  padding: 8px;
-}
-
 /* Scrollbar Styling */
 .messages-container::-webkit-scrollbar {
   width: 8px;
@@ -1979,158 +1827,4 @@ body {
 .message-content {
   transform: translateZ(0);
   backface-visibility: hidden;
-}
-
-/* Script Output Panel Styles */
-.script-output-container {
-  background-color: var(--chat-header-bg);
-  border: 1px solid var(--chat-border);
-  border-radius: 6px;
-  margin: 12px 16px;
-  overflow: hidden;
-  transition: all 0.2s ease;
-}
-
-.script-output-container.collapsed .script-output-content {
-  display: none;
-}
-
-.script-output-header {
-  display: flex;
-  align-items: center;
-  padding: 10px 14px;
-  cursor: pointer;
-  user-select: none;
-  background-color: var(--chat-header-bg);
-  border-bottom: 1px solid var(--chat-border);
-  transition: background-color 0.2s ease;
-}
-
-.script-output-header:hover {
-  background-color: var(--chat-toolbar-hover);
-}
-
-.script-output-title {
-  font-weight: 600;
-  font-size: 13px;
-  color: var(--chat-fg);
-  flex: 1;
-}
-
-.script-output-status {
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 10px;
-  margin-right: 8px;
-  font-weight: 500;
-  text-transform: uppercase;
-}
-
-.script-output-status-idle {
-  background-color: var(--vscode-badge-background);
-  color: var(--vscode-badge-foreground);
-}
-
-.script-output-status-running {
-  background-color: var(--vscode-progressBar-background);
-  color: var(--chat-fg);
-  animation: pulse 1.5s ease-in-out infinite;
-}
-
-.script-output-status-completed {
-  background-color: var(--vscode-testing-iconPassed);
-  color: var(--chat-fg);
-}
-
-.script-output-status-error {
-  background-color: var(--vscode-inputValidation-errorBackground);
-  color: var(--vscode-errorForeground);
-}
-
-.script-output-status-cancelled {
-  background-color: var(--vscode-inputValidation-warningBackground);
-  color: var(--vscode-inputValidation-warningForeground);
-}
-
-@keyframes pulse {
-  0%, 100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.6;
-  }
-}
-
-.script-output-toggle {
-  font-size: 10px;
-  color: var(--chat-foreground-muted);
-  transition: transform 0.2s ease;
-}
-
-.script-output-container.collapsed .script-output-toggle {
-  transform: rotate(0deg);
-}
-
-.script-output-content {
-  max-height: 300px;
-  overflow-y: auto;
-  background-color: var(--chat-bg);
-}
-
-.script-output-list {
-  padding: 8px 0;
-}
-
-.script-output-line {
-  display: flex;
-  padding: 4px 14px;
-  font-family: var(--vscode-editor-font-family);
-  font-size: 12px;
-  line-height: 1.4;
-  border-left: 3px solid transparent;
-}
-
-.script-output-line:hover {
-  background-color: var(--vscode-editor-inactiveSelectionBackground);
-}
-
-.script-output-stdout {
-  color: var(--chat-fg);
-  border-left-color: var(--vscode-testing-iconPassed);
-}
-
-.script-output-stderr {
-  color: var(--vscode-errorForeground);
-  border-left-color: var(--vscode-errorForeground);
-  background-color: var(--vscode-inputValidation-errorBackground);
-}
-
-.script-output-error {
-  color: var(--vscode-errorForeground);
-  border-left-color: var(--vscode-errorForeground);
-  background-color: var(--vscode-inputValidation-errorBackground);
-  font-weight: 500;
-}
-
-.script-output-exit {
-  color: var(--chat-foreground-muted);
-  border-left-color: var(--chat-foreground-muted);
-  font-style: italic;
-  border-top: 1px solid var(--chat-border);
-  margin-top: 4px;
-  padding-top: 8px;
-}
-
-.script-output-timestamp {
-  color: var(--chat-foreground-muted);
-  font-size: 10px;
-  margin-right: 10px;
-  flex-shrink: 0;
-  min-width: 60px;
-}
-
-.script-output-text {
-  flex: 1;
-  word-break: break-word;
-  white-space: pre-wrap;
 }

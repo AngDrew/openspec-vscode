@@ -6,7 +6,6 @@ export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: number;
-  toolCalls?: ToolCallInfo[];
   metadata?: {
     changeId?: string;
     phase?: WorkflowPhase;
@@ -14,17 +13,6 @@ export interface ChatMessage {
     _compressed?: boolean;
     _originalLength?: number;
   };
-}
-
-export interface ToolCallInfo {
-  id: string;
-  tool: string;
-  params: unknown;
-  status: 'pending' | 'running' | 'completed' | 'error';
-  startTime: number;
-  endTime?: number;
-  result?: unknown;
-  error?: string;
 }
 
 export type WorkflowPhase = 'new' | 'drafting' | 'implementation' | 'review' | 'completed';

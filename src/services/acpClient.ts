@@ -13,7 +13,7 @@ import {
   TerminalOutputRequest, TerminalOutputResponse, WaitForTerminalExitRequest,
   WaitForTerminalExitResponse, KillTerminalCommandRequest, KillTerminalCommandResponse,
   ReleaseTerminalRequest, ReleaseTerminalResponse, ToolCall, AcpMessage,
-  QuestionToolRequest, AcpConnectionConfig, OfflineState, ACP_METHODS,
+  AcpConnectionConfig, OfflineState, ACP_METHODS,
   AgentMessageChunkUpdate, ToolCallUpdate, ToolCallUpdateUpdate, PlanUpdate,
   AvailableCommandsUpdate, CurrentModeUpdate, AgentThoughtChunkUpdate,
   SessionModeState, SessionModelState, AvailableCommand
@@ -44,14 +44,16 @@ export class AcpClient {
   
   private messageListeners: Array<(message: AcpMessage) => void> = [];
   private connectionListeners: Array<(connected: boolean) => void> = [];
-  private toolCallListeners: Array<(toolCall: ToolCall) => void> = [];
-  private questionToolListeners: Array<(question: QuestionToolRequest) => void> = [];
+   private toolCallListeners: Array<(toolCall: ToolCall) => void> = [];
   private sessionCreatedListeners: Array<(sessionId: string, changeId?: string) => void> = [];
   private offlineListeners: Array<(state: OfflineState) => void> = [];
   private offlineState: OfflineState = { isOffline: false, pendingMessageCount: 0 };
   private messageQueue: string[] = [];
   private lastSuccessfulConnection: number | undefined;
   private reconnectTimer: NodeJS.Timeout | undefined;
+  private activeToolCalls = new Map<string, ToolCall>();
+  private activeStreamMessageId: string | undefined;
+  private currentResponseBuffer = '';
   
   // Client capability handlers
   private readTextFileHandler: ((params: ReadTextFileRequest) => Promise<ReadTextFileResponse>) | null = null;
@@ -373,6 +375,7 @@ export class AcpClient {
           status: tool.status === 'pending' ? 'pending' : 'running',
           startTime: Date.now()
         };
+        this.activeToolCalls.set(toolCall.id, toolCall);
         this.notifyToolCallListeners(toolCall);
         this.notifyMessageListeners({
           type: 'tool_call',
@@ -394,6 +397,10 @@ export class AcpClient {
           startTime: Date.now(),
           result: toolUpdate.rawOutput
         };
+        if (toolCall.status === 'completed' || toolCall.status === 'error') {
+          toolCall.endTime = Date.now();
+        }
+        this.activeToolCalls.set(toolCall.id, toolCall);
         this.notifyToolCallListeners(toolCall);
         this.notifyMessageListeners({
           type: 'tool_call_update',
@@ -574,10 +581,105 @@ export class AcpClient {
 
     this.cancelSession(this.currentSessionId).catch(() => {});
 
+    const response = this.createCancelledResponse(this.currentSessionId);
+    this.notifyMessageListeners({
+      type: 'streaming_cancelled',
+      messageId: response.messageId,
+      partialContent: response.content,
+      response
+    });
     return {
-      messageId: this.currentSessionId,
-      content: '[Streaming cancelled by user]'
+      messageId: response.messageId,
+      content: response.content
     };
+  }
+
+  parseResponse(data: unknown): { messageId: string; content: string; toolCalls: ToolCall[]; isComplete: boolean; timestamp: number } {
+    const now = Date.now();
+    const toolCalls: ToolCall[] = [];
+
+    if (typeof data === 'string') {
+      return {
+        messageId: `msg_${now}`,
+        content: data,
+        toolCalls,
+        isComplete: true,
+        timestamp: now
+      };
+    }
+
+    const payload = (data ?? {}) as Record<string, unknown>;
+    const messageId = typeof payload.messageId === 'string' ? payload.messageId : `msg_${now}`;
+    const content = typeof payload.content === 'string'
+      ? payload.content
+      : typeof payload.message === 'string'
+        ? payload.message
+        : typeof payload.text === 'string'
+          ? payload.text
+          : '';
+    const isComplete = typeof payload.isComplete === 'boolean' ? payload.isComplete : true;
+    const timestamp = typeof payload.timestamp === 'number' ? payload.timestamp : now;
+
+    const rawToolCalls = payload.toolCalls;
+    if (Array.isArray(rawToolCalls)) {
+      for (const raw of rawToolCalls) {
+        if (raw && typeof raw === 'object') {
+          const toolCall = raw as Record<string, unknown>;
+          toolCalls.push({
+            id: typeof toolCall.id === 'string' ? toolCall.id : `tc_${Date.now()}`,
+            tool: typeof toolCall.tool === 'string' ? toolCall.tool : 'unknown',
+            params: toolCall.params ?? {},
+            status: toolCall.status === 'completed' || toolCall.status === 'error' || toolCall.status === 'running' || toolCall.status === 'pending'
+              ? toolCall.status
+              : 'running',
+            startTime: typeof toolCall.startTime === 'number' ? toolCall.startTime : Date.now(),
+            endTime: typeof toolCall.endTime === 'number' ? toolCall.endTime : undefined,
+            result: toolCall.result,
+            error: typeof toolCall.error === 'string' ? toolCall.error : undefined
+          });
+        }
+      }
+    }
+
+    const rawToolCallsAlt = payload.tool_calls;
+    if (Array.isArray(rawToolCallsAlt)) {
+      for (const raw of rawToolCallsAlt) {
+        if (raw && typeof raw === 'object') {
+          const toolCall = raw as Record<string, unknown>;
+          toolCalls.push({
+            id: typeof toolCall.id === 'string' ? toolCall.id : `tc_${Date.now()}`,
+            tool: typeof toolCall.name === 'string' ? toolCall.name : 'unknown',
+            params: toolCall.arguments ?? {},
+            status: 'running',
+            startTime: Date.now()
+          });
+        }
+      }
+    }
+
+    return {
+      messageId,
+      content,
+      toolCalls,
+      isComplete,
+      timestamp
+    };
+  }
+
+  onResponse(listener: (response: { messageId: string; content: string; toolCalls: ToolCall[]; isComplete: boolean; timestamp: number }) => void): vscode.Disposable {
+    const responseListeners = this.messageListeners;
+    const handler = (message: AcpMessage) => {
+      if (message.type === 'streaming_end') {
+        listener(this.createCancelledResponse(message.messageId || `msg_${Date.now()}`));
+      }
+    };
+    responseListeners.push(handler);
+    return new vscode.Disposable(() => {
+      const index = responseListeners.indexOf(handler);
+      if (index > -1) {
+        responseListeners.splice(index, 1);
+      }
+    });
   }
 
   async startPlanMode(): Promise<boolean> {
@@ -701,17 +803,6 @@ export class AcpClient {
       }
     });
   }
-
-  onQuestionTool(listener: (question: QuestionToolRequest) => void): vscode.Disposable {
-    this.questionToolListeners.push(listener);
-    return new vscode.Disposable(() => {
-      const index = this.questionToolListeners.indexOf(listener);
-      if (index > -1) {
-        this.questionToolListeners.splice(index, 1);
-      }
-    });
-  }
-
   onSessionCreated(listener: (sessionId: string, changeId?: string) => void): vscode.Disposable {
     this.sessionCreatedListeners.push(listener);
     return new vscode.Disposable(() => {
@@ -761,6 +852,92 @@ export class AcpClient {
         ErrorHandler.debug(`Error in tool call listener: ${error}`);
       }
     });
+  }
+
+  private handleNotification(notification: { jsonrpc: '2.0'; method: string; params?: unknown }): void {
+    const { method, params } = notification;
+
+    switch (method) {
+      case 'message': {
+        const message = params as { content?: string; messageId?: string } | undefined;
+        if (message?.content) {
+          this.currentResponseBuffer += message.content;
+          this.notifyMessageListeners({
+            type: 'text',
+            content: message.content,
+            messageId: message.messageId
+          });
+        }
+        break;
+      }
+      case 'message_delta': {
+        const message = params as { delta?: string; messageId?: string } | undefined;
+        if (typeof message?.delta === 'string' && message.delta.length > 0) {
+          this.currentResponseBuffer += message.delta;
+          this.notifyMessageListeners({
+            type: 'text_delta',
+            delta: message.delta,
+            messageId: message.messageId
+          });
+        }
+        break;
+      }
+      case 'streaming_start': {
+        const message = params as { messageId?: string } | undefined;
+        if (message?.messageId) {
+          this.activeStreamMessageId = message.messageId;
+        }
+        this.currentResponseBuffer = '';
+        this.notifyMessageListeners({ type: 'streaming_start', messageId: message?.messageId });
+        break;
+      }
+      case 'streaming_end': {
+        const message = params as { messageId?: string } | undefined;
+        this.activeStreamMessageId = undefined;
+        this.notifyMessageListeners({ type: 'streaming_end', messageId: message?.messageId });
+        break;
+      }
+      case 'tool_call': {
+        const tool = params as { tool?: string; id?: string; params?: unknown } | undefined;
+        const toolCall: ToolCall = {
+          id: tool?.id || `tc_${Date.now()}`,
+          tool: tool?.tool || 'unknown',
+          params: tool?.params ?? {},
+          status: 'running',
+          startTime: Date.now()
+        };
+        this.activeToolCalls.set(toolCall.id, toolCall);
+        this.notifyToolCallListeners(toolCall);
+        break;
+      }
+      case 'tool_result': {
+        const tool = params as { id?: string; result?: unknown; error?: string; tool?: string } | undefined;
+        if (!tool?.id) {
+          break;
+        }
+        const existing = this.activeToolCalls.get(tool.id);
+        const updated: ToolCall = {
+          id: tool.id,
+          tool: tool.tool || existing?.tool || 'unknown',
+          params: existing?.params ?? {},
+          status: tool.error ? 'error' : 'completed',
+          startTime: existing?.startTime ?? Date.now(),
+          endTime: Date.now(),
+          result: tool.result,
+          error: tool.error
+        };
+        this.activeToolCalls.set(updated.id, updated);
+        this.notifyToolCallListeners(updated);
+        break;
+      }
+      case 'status': {
+        const status = params as { status?: string } | undefined;
+        this.notifyMessageListeners({ type: 'status', status: status?.status });
+        break;
+      }
+      default:
+        break;
+    }
   }
 
   private notifySessionCreatedListeners(sessionId: string, changeId?: string): void {
@@ -816,6 +993,36 @@ export class AcpClient {
     }));
   }
 
+  queueMessage(content: string): { id: string; content: string; timestamp: number; retryCount: number } {
+    if (this.messageQueue.length >= AcpClient.MAX_QUEUED_MESSAGES) {
+      this.messageQueue.shift();
+    }
+
+    this.messageQueue.push(content);
+    this.updateOfflineState(this.offlineState.isOffline);
+
+    return {
+      id: `queued_${this.messageQueue.length - 1}`,
+      content,
+      timestamp: Date.now(),
+      retryCount: 0
+    };
+  }
+
+  getActiveToolCalls(): ToolCall[] {
+    return Array.from(this.activeToolCalls.values());
+  }
+
+  private createCancelledResponse(messageId: string): { messageId: string; content: string; toolCalls: ToolCall[]; isComplete: boolean; timestamp: number } {
+    return {
+      messageId,
+      content: this.currentResponseBuffer,
+      toolCalls: this.getActiveToolCalls(),
+      isComplete: true,
+      timestamp: Date.now()
+    };
+  }
+
   clearMessageQueue(): void {
     this.messageQueue = [];
     this.updateOfflineState(this.offlineState.isOffline);
@@ -844,5 +1051,7 @@ export class AcpClient {
     this.connectionListeners = [];
     this.toolCallListeners = [];
     this.offlineListeners = [];
+    this.activeToolCalls.clear();
+    this.activeStreamMessageId = undefined;
   }
 }

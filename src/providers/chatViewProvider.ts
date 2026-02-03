@@ -1,6 +1,5 @@
 import * as vscode from 'vscode';
 import { ErrorHandler } from '../utils/errorHandler';
-import { WorkspaceUtils } from '../utils/workspace';
 import { SessionManager } from '../services/sessionManager';
 import { AcpClient } from '../services/acpClient';
 import { PortManager } from '../services/portManager';
@@ -13,8 +12,6 @@ export interface ChatMessage {
   timestamp: number;
   metadata?: {
     isStreaming?: boolean;
-    isToolCall?: boolean;
-    toolName?: string;
     artifact?: ArtifactData;
     questionId?: string;
     changeId?: string;
@@ -60,6 +57,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private _session: ChatSession;
   private _acpClient: AcpClient;
   private _sessionManager: SessionManager;
+  private _streamingBuffers = new Map<string, string>();
 
   private _capabilities: AcpClientCapabilities;
 
@@ -103,9 +101,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     
     // Restore session data if exists
     this._restoreSession();
-    
-    // Auto-start ACP server on first view open
-    this._ensureServerRunning();
+
+    const portManager = PortManager.getInstance();
+    this.setConnectionState(this._acpClient.isClientConnected(), portManager.getSelectedPort());
 
     // Update context when view is visible
     webviewView.onDidChangeVisibility(() => {
@@ -123,92 +121,15 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     );
   }
 
-  private async _ensureServerRunning(): Promise<void> {
-    const config = vscode.workspace.getConfiguration('openspec');
-    const autoStart = config.get('chat.autoStartServer', true);
-    
-    if (!autoStart) {
-      return;
-    }
-
-    try {
-      const portManager = PortManager.getInstance();
-      const port = portManager.getSelectedPort();
-      
-      if (!port) {
-        // Find available port and start
-        const newPort = await portManager.findAvailablePort();
-        if (newPort) {
-          await this._startAcpServer(newPort);
-        }
-      } else {
-        // Check if already running
-        const isRunning = await WorkspaceUtils.isPortOpen('127.0.0.1', port, 500);
-        if (!isRunning) {
-          await this._startAcpServer(port);
-        }
-      }
-    } catch (error) {
-      ErrorHandler.handle(error as Error, 'Failed to auto-start ACP server', false);
-    }
-  }
-
-  private async _startAcpServer(port: number): Promise<void> {
-    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-    if (!workspaceFolder) {
-      return;
-    }
-
-    try {
-      // Start ACP server which also starts HTTP server on same port
-      const terminal = vscode.window.createTerminal({
-        name: 'OpenCode ACP Server',
-        cwd: workspaceFolder.uri.fsPath
-      });
-
-      terminal.sendText(`opencode acp --port ${port} --hostname 127.0.0.1 --print-logs`, true);
-      terminal.show(true);
-
-      // Wait for server to be ready
-      let attempts = 0;
-      const maxAttempts = 30;
-      while (attempts < maxAttempts) {
-        await this._delay(500);
-        const isRunning = await WorkspaceUtils.isPortOpen('127.0.0.1', port, 500);
-        if (isRunning) {
-          ErrorHandler.info(`ACP server started on port ${port}`, false);
-          return;
-        }
-        attempts++;
-      }
-
-      throw new Error(`Server did not start within ${maxAttempts * 500}ms`);
-    } catch (error) {
-      ErrorHandler.handle(error as Error, 'Failed to start ACP server', true);
-    }
-  }
-
-  private _delay(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
-
   private _setupAcpListeners(): void {
     // Listen for ACP session updates
     this._acpClient.onMessage((message) => {
       this._handleAcpMessage(message);
     });
 
-    this._acpClient.onToolCall((toolCall) => {
-      this.addToolCall({
-        id: toolCall.id,
-        name: toolCall.tool,
-        parameters: toolCall.params,
-        status: toolCall.status,
-        timestamp: toolCall.startTime
-      });
-    });
-
     this._acpClient.onConnectionChange((connected) => {
+      const portManager = PortManager.getInstance();
+      this.setConnectionState(connected, portManager.getSelectedPort());
       if (!connected) {
         this.showConnectionError('Disconnected from OpenCode server', true);
       } else {
@@ -221,15 +142,15 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     switch (message.type) {
       case 'text':
       case 'text_delta':
-        // Handle streaming or complete messages
-        if (message.content) {
-          this._updateOrAddAssistantMessage(message.content, message.messageId);
-        }
+        this._handleAssistantStream(message);
         break;
       case 'streaming_start':
         this.setStreamingState(true, message.messageId);
         break;
       case 'streaming_end':
+        if (message.messageId) {
+          this._streamingBuffers.delete(message.messageId);
+        }
         this.setStreamingState(false, message.messageId);
         break;
       case 'status':
@@ -265,6 +186,40 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         timestamp: Date.now()
       });
     }
+  }
+
+  private _handleAssistantStream(message: { type: string; content?: string; delta?: string; messageId?: string }): void {
+    const incomingText = message.content ?? message.delta;
+    if (!incomingText) {
+      return;
+    }
+
+    const targetMessageId = this._resolveStreamingMessageId(message.messageId);
+    const bufferKey = targetMessageId || message.messageId || this._generateMessageId();
+
+    if (message.type === 'text_delta') {
+      const current = this._streamingBuffers.get(bufferKey) || '';
+      const next = current + incomingText;
+      this._streamingBuffers.set(bufferKey, next);
+      this._updateOrAddAssistantMessage(next, bufferKey);
+      this.setStreamingState(true, bufferKey);
+      return;
+    }
+
+    this._streamingBuffers.delete(bufferKey);
+    this._updateOrAddAssistantMessage(incomingText, bufferKey);
+    this.setStreamingState(false, bufferKey);
+  }
+
+  private _resolveStreamingMessageId(messageId?: string): string | undefined {
+    if (messageId && this._session.messages.some(m => m.id === messageId)) {
+      return messageId;
+    }
+
+    const streamingMessage = this._session.messages.find(
+      m => m.role === 'assistant' && m.metadata?.isStreaming
+    );
+    return streamingMessage?.id || messageId;
   }
 
   private _createNewSession(): ChatSession {
@@ -359,6 +314,15 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
+  public setConnectionState(connected: boolean, port?: number): void {
+    const state = connected ? 'connected' : 'disconnected';
+    this.postMessage({
+      type: 'connectionState',
+      state,
+      port
+    });
+  }
+
   public showOfflineIndicator(): void {
     this.postMessage({ type: 'showOfflineIndicator' });
   }
@@ -377,32 +341,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
   public hideConnectionError(): void {
     this.postMessage({ type: 'connectionErrorResolved' });
-  }
-
-  public addToolCall(toolCall: { id: string; name: string; parameters?: unknown; status?: string; timestamp?: number }): void {
-    this.postMessage({
-      type: 'addToolCall',
-      toolCall: {
-        id: toolCall.id,
-        name: toolCall.name,
-        parameters: toolCall.parameters,
-        status: toolCall.status || 'pending',
-        timestamp: toolCall.timestamp || Date.now()
-      }
-    });
-  }
-
-  public updateToolCallStatus(toolCallId: string, status: string, result?: unknown): void {
-    this.postMessage({
-      type: 'updateToolCall',
-      toolCallId,
-      status,
-      result
-    });
-  }
-
-  public clearToolCalls(): void {
-    this.postMessage({ type: 'clearToolCalls' });
   }
 
   public updatePhaseTracker(phases: Array<{ id: string; name: string; status: 'pending' | 'active' | 'completed' }>): void {
@@ -489,67 +427,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       return;
     }
 
-    const trimmedContent = content.trim();
-    
-    // Check for slash commands
-    if (trimmedContent.startsWith('/')) {
-      const command = trimmedContent.split(' ')[0].toLowerCase();
-      const args = trimmedContent.slice(command.length).trim();
-      
-      const userMessage: ChatMessage = {
-        id: this._generateMessageId(),
-        role: 'user',
-        content: trimmedContent,
-        timestamp: Date.now()
-      };
-      this.addMessage(userMessage);
-      
-      switch (command) {
-        case '/new':
-          await vscode.commands.executeCommand('openspec.chat.newChange');
-          return;
-        case '/ff':
-        case '/fastforward':
-          await vscode.commands.executeCommand('openspec.chat.fastForward', args || undefined);
-          return;
-        case '/apply': {
-          const count = args ? parseInt(args, 10) : undefined;
-          await vscode.commands.executeCommand('openspec.chat.apply', undefined, count && !isNaN(count) ? count : undefined);
-          return;
-        }
-        case '/archive':
-          await vscode.commands.executeCommand('openspec.chat.archive');
-          return;
-        case '/clear':
-          this.clearChat();
-          this.addMessage({
-            id: this._generateMessageId(),
-            role: 'system',
-            content: 'Chat history cleared.',
-            timestamp: Date.now()
-          });
-          return;
-        case '/status': {
-          const phaseDisplay = this._session.phase === 'idle' ? 'No active change' : `Current phase: ${this._session.phase}`;
-          const changeDisplay = this._session.changeId ? `Change: ${this._session.changeId}` : 'No change selected';
-          this.addMessage({
-            id: this._generateMessageId(),
-            role: 'system',
-            content: `${phaseDisplay}\n${changeDisplay}`,
-            timestamp: Date.now()
-          });
-          return;
-        }
-        default:
-          this.addMessage({
-            id: this._generateMessageId(),
-            role: 'system',
-            content: `Unknown command: ${command}. Available commands: /new, /ff, /apply, /archive, /clear, /status`,
-            timestamp: Date.now()
-          });
-          return;
-      }
-    }
+        const trimmedContent = content.trim();
 
     const userMessage: ChatMessage = {
       id: this._generateMessageId(),
@@ -660,34 +538,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     vscode.commands.executeCommand('openspecChat.focus');
   }
 
-  public displayQuestion(question: { id: string; question: string; options?: string[]; allowMultiple?: boolean; allowCustom?: boolean }): void {
-    this.postMessage({
-      type: 'displayQuestion',
-      question
-    });
-  }
-
-  public addScriptOutput(output: { type: string; content: string; timestamp: number }): void {
-    this.postMessage({
-      type: 'addScriptOutput',
-      output
-    });
-  }
-
-  public updateScriptExecutionStatus(status: string, message?: string): void {
-    this.postMessage({
-      type: 'updateScriptExecutionStatus',
-      status,
-      message
-    });
-  }
-
-  public clearScriptOutput(): void {
-    this.postMessage({
-      type: 'clearScriptOutput'
-    });
-  }
-
   public cancelStreaming(): void {
     vscode.commands.executeCommand('openspec.chat.cancelStreaming');
   }
@@ -743,7 +593,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             <button class="offline-indicator-close" id="offlineIndicatorCloseBtn" title="Dismiss">×</button>
           </div>
           <div class="chat-header">
-            <h1>OpenSpec Chat</h1>
+            <div class="chat-header-main">
+              <h1>OpenSpec Chat</h1>
+              <span class="connection-status" id="connectionStatus">Disconnected</span>
+            </div>
             <button class="clear-button" id="clearBtn" title="Clear chat history">Clear</button>
           </div>
           <div class="phase-tracker" id="phaseTracker">
@@ -800,41 +653,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
               <span class="action-btn-text">Archive</span>
             </button>
           </div>
-          <div class="tool-calls-panel collapsed" id="toolCallsPanel">
-            <div class="tool-calls-header" id="toolCallsHeader">
-              <div class="tool-calls-title">
-                <span class="tool-calls-icon">T</span>
-                <span>Tool Calls</span>
-                <span class="tool-calls-count" id="toolCallsCount" data-count="0"></span>
-              </div>
-              <span class="tool-calls-toggle" id="toolCallsToggle">▶</span>
-            </div>
-            <div class="tool-calls-content" id="toolCallsContent">
-              <div class="tool-calls-empty" id="toolCallsEmpty">No tool calls yet</div>
-              <div class="tool-calls-list" id="toolCallsList"></div>
-            </div>
-          </div>
           <div class="messages-container" id="messagesContainer">
             <div class="empty-state" id="emptyState">
-              <p>Start a conversation to begin working with OpenSpec</p>
-              <div class="empty-state-hints">
-                <div class="hint-item">
-                  <span class="hint-command">/new</span>
-                  <span class="hint-desc">Create a new change</span>
-                </div>
-                <div class="hint-item">
-                  <span class="hint-command">/ff</span>
-                  <span class="hint-desc">Fast-forward artifacts</span>
-                </div>
-                <div class="hint-item">
-                  <span class="hint-command">/apply</span>
-                  <span class="hint-desc">Apply changes</span>
-                </div>
-                <div class="hint-item">
-                  <span class="hint-command">/status</span>
-                  <span class="hint-desc">Show current status</span>
-                </div>
-              </div>
+              <p>Start a conversation or use the workflow buttons above.</p>
             </div>
           </div>
           <div class="typing-indicator" id="typingIndicator" style="display: none;">

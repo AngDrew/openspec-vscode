@@ -8,44 +8,95 @@ import { ExtensionRuntimeState } from './runtime';
 import { ServerLifecycle } from '../services/serverLifecycle';
 import { SessionManager } from '../services/sessionManager';
 import { AcpClient } from '../services/acpClient';
-import { RalphService } from '../services/ralphService';
+
 import { PortManager } from '../services/portManager';
 import { ChatMessage } from '../providers/chatViewProvider';
 
-async function sleep(ms: number): Promise<void> {
-  await new Promise(resolve => setTimeout(resolve, ms));
+/**
+ * Ensures ACP client is connected and has an active session.
+ * This is the central helper for all chat commands.
+ */
+async function ensureAcpReady(
+  chatProvider?: typeof import('../providers/chatViewProvider').ChatViewProvider.prototype
+): Promise<{ success: boolean; error?: string }> {
+  const acpClient = AcpClient.getInstance();
+  const sessionManager = SessionManager.getInstance();
+
+  // Step 1: Ensure connection
+  if (!acpClient.isClientConnected()) {
+    if (chatProvider) {
+      chatProvider.addMessage({
+        id: `msg_${Date.now()}`,
+        role: 'system',
+        content: 'Connecting to OpenCode ACP server...',
+        timestamp: Date.now()
+      });
+    }
+
+    const connected = await acpClient.connect();
+    if (!connected) {
+      const errorMsg = 'Failed to connect to OpenCode ACP server. Please ensure opencode is installed and try again.';
+      if (chatProvider) {
+        chatProvider.addMessage({
+          id: `error_${Date.now()}`,
+          role: 'system',
+          content: `Error: ${errorMsg}`,
+          timestamp: Date.now(),
+          metadata: { isError: true }
+        });
+      }
+      return { success: false, error: errorMsg };
+    }
+  }
+
+  // Step 2: Check for existing session
+  let sessionId = await sessionManager.getAcpSessionId();
+
+  if (sessionId) {
+    // Try to load existing session
+    const loaded = await acpClient.loadSession(sessionId);
+    if (!loaded) {
+      // Session expired, create new one
+      ErrorHandler.debug(`ACP session ${sessionId} expired, creating new session`);
+      sessionId = await acpClient.createSession();
+      if (sessionId) {
+        await sessionManager.setAcpSessionId(sessionId);
+      }
+    }
+  } else {
+    // No session, create new one
+    sessionId = await acpClient.createSession();
+    if (sessionId) {
+      await sessionManager.setAcpSessionId(sessionId);
+    }
+  }
+
+  if (!sessionId) {
+    const errorMsg = 'Failed to create ACP session. Please try again.';
+    if (chatProvider) {
+      chatProvider.addMessage({
+        id: `error_${Date.now()}`,
+        role: 'system',
+        content: `Error: ${errorMsg}`,
+        timestamp: Date.now(),
+        metadata: { isError: true }
+      });
+    }
+    return { success: false, error: errorMsg };
+  }
+
+  return { success: true };
 }
 
-async function ensureLocalOpenCodeServerReady(timeoutMs: number = 15000): Promise<boolean> {
-  try {
-    const portManager = PortManager.getInstance();
-    const port = portManager.getSelectedPort();
-    
-    if (!port) {
-      // No port configured yet
-      return false;
-    }
-
-    const alreadyListening = await WorkspaceUtils.isPortOpen('127.0.0.1', port, 500);
-    if (alreadyListening) {
-      return true;
-    }
-
-    // Use the same behavior as the explicit start button.
-    await vscode.commands.executeCommand(Commands.opencodeStartServer);
-
-    const startedAt = Date.now();
-    while (Date.now() - startedAt < timeoutMs) {
-      if (await WorkspaceUtils.isPortOpen('127.0.0.1', port, 500)) {
-        return true;
-      }
-      await sleep(500);
-    }
-
-    return false;
-  } catch {
-    return false;
+async function ensureLocalOpenCodeServerReady(_timeoutMs?: number): Promise<boolean> {
+  // Delegate to ACP client connection check
+  const acpClient = AcpClient.getInstance();
+  if (acpClient.isClientConnected()) {
+    return true;
   }
+
+  const result = await ensureAcpReady();
+  return result.success;
 }
 
 function pickNodeCommand(): string {
@@ -337,9 +388,17 @@ export function registerCommands(context: vscode.ExtensionContext, runtime: Exte
     }
 
     try {
-      const terminalName = `OpenSpec Archive: ${changeId}`;
-      const terminal = vscode.window.createTerminal({ name: terminalName });
-      terminal.show(true);
+      // Use ACP instead of starting a terminal
+      const acpClient = AcpClient.getInstance();
+      
+      // Ensure ACP is connected
+      const connected = await acpClient.connect();
+      if (!connected) {
+        vscode.window.showErrorMessage(
+          'Failed to connect to OpenCode ACP server. Please ensure opencode is installed.'
+        );
+        return;
+      }
 
       let tasksStatusLine = 'Tasks: unknown';
       try {
@@ -360,13 +419,23 @@ export function registerCommands(context: vscode.ExtensionContext, runtime: Exte
         // best-effort
       }
 
-      // User-requested archive prompt content (delegated to opencode).
+      // Build the archive prompt
       const prompt =
-        'use openspec skill to archive the changes, use question tools when there is multiple spec. let the user know if the tasks is completed or not. '
+        'use openspec skill to archive the changes. let the user know if the tasks is completed or not. '
         + `Change: ${changeId}. ${tasksStatusLine}.`;
 
-      // Feed opencode a direct prompt. (Matches existing extension pattern of delegating workflows to opencode.)
-      terminal.sendText(`opencode --prompt ${JSON.stringify(prompt)}`, true);
+      // Send the prompt via ACP
+      const sessionId = await sessionManager.getAcpSessionId();
+      if (sessionId) {
+        await acpClient.sendMessage(prompt);
+      } else {
+        // Create a new session if none exists
+        const newSessionId = await acpClient.createSession();
+        if (newSessionId) {
+          await sessionManager.setAcpSessionId(newSessionId);
+          await acpClient.sendMessage(prompt);
+        }
+      }
 
       // Clean up sessions associated with this change after archiving
       await sessionManager.cleanupSessionsForChange(changeId);
@@ -378,44 +447,39 @@ export function registerCommands(context: vscode.ExtensionContext, runtime: Exte
     }
   });
 
-  // Start OpenCode server command
+  // Start OpenCode server command - now connects via ACP client
   const startOpenCodeServerCommand = vscode.commands.registerCommand(Commands.opencodeStartServer, async () => {
     try {
-      const portManager = PortManager.getInstance();
-      const port = portManager.getSelectedPort();
+      const acpClient = AcpClient.getInstance();
       
-      if (!port) {
-        vscode.window.showErrorMessage('No port configured. Please open the chat view first.');
+      if (acpClient.isClientConnected()) {
+        vscode.window.showInformationMessage('OpenCode ACP server is already connected');
         return;
       }
 
-      const alreadyListening = await WorkspaceUtils.isPortOpen('127.0.0.1', port, 500);
-      if (alreadyListening) {
-        // If we have (or can find) the terminal, reveal it for convenience.
-        const existing = vscode.window.terminals.find(t => t.name === 'OpenCode ACP Server');
-        existing?.show(true);
-        vscode.window.showInformationMessage(`OpenCode server already running on port ${port}`);
-        return;
+      vscode.window.showInformationMessage('Connecting to OpenCode ACP server...');
+      
+      const connected = await acpClient.connect();
+      
+      if (connected) {
+        vscode.window.showInformationMessage('Successfully connected to OpenCode ACP server');
+        
+        // Create a session if needed
+        const sessionManager = SessionManager.getInstance();
+        let sessionId = await sessionManager.getAcpSessionId();
+        
+        if (!sessionId) {
+          sessionId = await acpClient.createSession();
+          if (sessionId) {
+            await sessionManager.setAcpSessionId(sessionId);
+            vscode.window.showInformationMessage('ACP session created successfully');
+          }
+        }
+      } else {
+        vscode.window.showErrorMessage(
+          'Failed to connect to OpenCode ACP server. Please ensure opencode is installed and try again.'
+        );
       }
-
-      // Reuse an existing terminal if it still exists; otherwise create a new one.
-      if (runtime.openCodeServerTerminal && !vscode.window.terminals.includes(runtime.openCodeServerTerminal)) {
-        runtime.openCodeServerTerminal = undefined;
-      }
-
-      if (!runtime.openCodeServerTerminal) {
-        runtime.openCodeServerTerminal = vscode.window.terminals.find(t => t.name === 'OpenCode ACP Server')
-          ?? vscode.window.createTerminal({ name: 'OpenCode ACP Server' });
-      }
-
-      const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-      if (workspaceFolder) {
-        runtime.openCodeServerTerminal.sendText(`cd "${workspaceFolder.uri.fsPath}"`, true);
-      }
-
-      runtime.openCodeServerTerminal.show(true);
-      // Start ACP server which also starts HTTP server on same port
-      runtime.openCodeServerTerminal.sendText(`opencode acp --port ${port} --hostname 127.0.0.1 --print-logs`, true);
     } catch (error) {
       vscode.window.showErrorMessage(
         `Failed to start OpenCode server: ${error instanceof Error ? error.message : 'Unknown error'}`
@@ -423,10 +487,12 @@ export function registerCommands(context: vscode.ExtensionContext, runtime: Exte
     }
   });
 
-  // Open OpenCode UI (http://localhost:4099) in default browser
+  // Open OpenCode UI in default browser
   const openOpenCodeUiCommand = vscode.commands.registerCommand(Commands.opencodeOpenUi, async () => {
     try {
-      const url = vscode.Uri.parse('http://localhost:4099');
+      const portManager = PortManager.getInstance();
+      const port = portManager.getSelectedPort() || 4099;
+      const url = vscode.Uri.parse(`http://localhost:${port}`);
       await vscode.env.openExternal(url);
     } catch (error) {
       vscode.window.showErrorMessage(
@@ -463,15 +529,29 @@ export function registerCommands(context: vscode.ExtensionContext, runtime: Exte
         runtime.chatProvider.setCurrentPhase('new');
       }
 
-      const prompt = 'load openspec new change skill';
+      // Use ACP instead of starting a terminal
+      const acpClient = AcpClient.getInstance();
+      
+      // Ensure ACP is connected
+      const connected = await acpClient.connect();
+      if (!connected) {
+        vscode.window.showErrorMessage(
+          'Failed to connect to OpenCode ACP server. Please ensure opencode is installed.'
+        );
+        return;
+      }
 
-      const terminalName = 'OpenSpec New Change';
-      const terminal = vscode.window.createTerminal({ name: terminalName });
-      terminal.show(true);
-      terminal.sendText(
-        `opencode --agent plan --prompt ${JSON.stringify(prompt)}`,
-        true
-      );
+      // Create a session
+      const sessionId = await acpClient.createSession();
+      if (sessionId) {
+        await sessionManager.setAcpSessionId(sessionId);
+        // Send the new change prompt via ACP
+        await acpClient.sendMessage('load openspec new change skill');
+      } else {
+        vscode.window.showErrorMessage(
+          'Failed to create ACP session'
+        );
+      }
     } catch (error) {
       vscode.window.showErrorMessage(
         `Failed to start new change flow: ${error instanceof Error ? error.message : 'Unknown error'}`
@@ -736,8 +816,9 @@ export function registerCommands(context: vscode.ExtensionContext, runtime: Exte
 
     try {
       // Ensure connection to ACP server
-      if (!acpClient.isClientConnected()) {
-        const connected = await acpClient.connect();
+    if (!acpClient.isClientConnected()) {
+      chatProvider.setConnectionState(false, PortManager.getInstance().getSelectedPort());
+      const connected = await acpClient.connect();
         if (!connected) {
           // Check if offline mode is enabled
           const config = vscode.workspace.getConfiguration('openspec');
@@ -781,6 +862,7 @@ export function registerCommands(context: vscode.ExtensionContext, runtime: Exte
             pendingMessageCount: offlineState.pendingMessageCount,
             lastConnectedAt: Date.now()
           });
+          chatProvider.setConnectionState(true, PortManager.getInstance().getSelectedPort());
         }
       }
       
@@ -796,9 +878,6 @@ export function registerCommands(context: vscode.ExtensionContext, runtime: Exte
       
       // Add to disposables for cleanup
       context.subscriptions.push(offlineDisposable);
-
-      // Clear previous tool calls for new conversation
-      chatProvider.clearToolCalls();
 
       // Create placeholder message for AI response
       const assistantMessageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -829,7 +908,6 @@ export function registerCommands(context: vscode.ExtensionContext, runtime: Exte
               type: 'hideTypingIndicator'
             });
             messageDisposable.dispose();
-            toolCallDisposable.dispose();
             break;
           case 'error':
             chatProvider.updateMessage(assistantMessageId, `Error: ${message.message}`, false);
@@ -837,40 +915,8 @@ export function registerCommands(context: vscode.ExtensionContext, runtime: Exte
               type: 'hideTypingIndicator'
             });
             messageDisposable.dispose();
-            toolCallDisposable.dispose();
             break;
         }
-      });
-
-      // Set up tool call listener to display tool execution status
-      const toolCallDisposable = acpClient.onToolCall((toolCall) => {
-        chatProvider.addToolCall({
-          id: toolCall.id,
-          name: toolCall.tool,
-          parameters: toolCall.params,
-          status: toolCall.status,
-          timestamp: toolCall.startTime
-        });
-
-        // Update status if tool call is completed or has an error
-        if (toolCall.status === 'completed' || toolCall.status === 'error') {
-          chatProvider.updateToolCallStatus(
-            toolCall.id,
-            toolCall.status,
-            toolCall.result || toolCall.error
-          );
-        }
-      });
-
-      // Set up question tool listener to handle AI questions
-      const questionToolDisposable = acpClient.onQuestionTool((question) => {
-        chatProvider.displayQuestion({
-          id: question.id,
-          question: question.question,
-          options: question.options,
-          allowMultiple: question.allowMultiple,
-          allowCustom: question.allowCustom
-        });
       });
 
       // Set up session created listener to capture session ID
@@ -889,7 +935,7 @@ export function registerCommands(context: vscode.ExtensionContext, runtime: Exte
         }
       });
 
-      context.subscriptions.push(questionToolDisposable, sessionCreatedDisposable);
+      context.subscriptions.push(sessionCreatedDisposable);
 
       // Send message to ACP server
       await acpClient.sendMessage(userMessage.content);
@@ -928,6 +974,17 @@ export function registerCommands(context: vscode.ExtensionContext, runtime: Exte
   // Chat: New Change command - triggered from chat interface
   const chatNewChangeCommand = vscode.commands.registerCommand(Commands.chatNewChange, async () => {
     try {
+      const description = await vscode.window.showInputBox({
+        title: 'New Change Description',
+        prompt: 'Describe the change you want to make',
+        placeHolder: 'e.g., add connection status indicator to chat panel',
+        ignoreFocusOut: true
+      });
+
+      if (!description) {
+        return;
+      }
+
       const sessionManager = SessionManager.getInstance();
       await sessionManager.setPhase('new');
       await sessionManager.addMessage({
@@ -940,7 +997,7 @@ export function registerCommands(context: vscode.ExtensionContext, runtime: Exte
         runtime.chatProvider.addMessage({
           id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
           role: 'system',
-          content: 'Creating a new OpenSpec change. Starting ACP plan mode...',
+          content: `Creating a new OpenSpec change: ${description.trim()}`,
           timestamp: Date.now()
         });
         runtime.chatProvider.updatePhaseTracker([
@@ -951,54 +1008,18 @@ export function registerCommands(context: vscode.ExtensionContext, runtime: Exte
         runtime.chatProvider.setCurrentPhase('new');
       }
 
-      // Start ACP plan mode for interactive change creation
+      // Ensure ACP is connected and has a session
+      const acpReady = await ensureAcpReady(runtime.chatProvider);
+      
+      if (!acpReady.success) {
+        throw new Error(acpReady.error || 'Failed to connect to ACP');
+      }
+
       const acpClient = AcpClient.getInstance();
-      
-      // Set up question tool listener
-      const questionDisposable = acpClient.onQuestionTool((question) => {
-        if (runtime.chatProvider) {
-          runtime.chatProvider.displayQuestion({
-            id: question.id,
-            question: question.question,
-            options: question.options,
-            allowMultiple: question.allowMultiple,
-            allowCustom: question.allowCustom
-          });
-        }
-      });
 
-      // Set up session created listener
-      const sessionDisposable = acpClient.onSessionCreated((sessionId, changeId) => {
-        if (changeId && runtime.chatProvider) {
-          sessionManager.setChangeId(changeId);
-          sessionManager.setAcpSessionId(sessionId);
-          runtime.chatProvider.addMessage({
-            id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-            role: 'system',
-            content: `Change created: ${changeId}`,
-            timestamp: Date.now(),
-            metadata: { changeId }
-          });
-        }
-      });
+      // Send the prompt to OpenCode via ACP
+      await acpClient.sendMessage(`load openspec new change skill. ${description.trim()}`);
 
-      context.subscriptions.push(questionDisposable, sessionDisposable);
-
-      // Start plan mode
-      const planModeStarted = await acpClient.startPlanMode();
-      
-      if (!planModeStarted) {
-        throw new Error('Failed to start ACP plan mode');
-      }
-
-      if (runtime.chatProvider) {
-        runtime.chatProvider.addMessage({
-          id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-          role: 'assistant',
-          content: 'Hello! I\'m ready to help you create a new OpenSpec change. Please describe what you\'d like to work on.',
-          timestamp: Date.now()
-        });
-      }
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       ErrorHandler.handle(err, 'starting new change from chat', true);
@@ -1047,7 +1068,7 @@ export function registerCommands(context: vscode.ExtensionContext, runtime: Exte
         runtime.chatProvider.addMessage({
           id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
           role: 'system',
-          content: `Fast-forwarding change "${changeId}". Opening terminal to generate artifacts...`,
+          content: `Fast-forwarding change "${changeId}" via ACP...`,
           timestamp: Date.now()
         });
         runtime.chatProvider.updatePhaseTracker([
@@ -1058,29 +1079,18 @@ export function registerCommands(context: vscode.ExtensionContext, runtime: Exte
         runtime.chatProvider.setCurrentPhase('drafting');
       }
 
-      const ready = await ensureLocalOpenCodeServerReady();
-      if (!ready) {
-        if (runtime.chatProvider) {
-          runtime.chatProvider.addMessage({
-            id: `error_${Date.now()}`,
-            role: 'system',
-            content: 'OpenCode server is not responding on port 4099. Please start the server first.',
-            timestamp: Date.now()
-          });
-        }
-        return;
+      // Ensure ACP is connected and has a session
+      const acpReady = await ensureAcpReady(runtime.chatProvider);
+      
+      if (!acpReady.success) {
+        throw new Error(acpReady.error || 'Failed to connect to ACP');
       }
 
-      const terminalName = `OpenSpec FF: ${changeId}`;
-      const terminal = vscode.window.createTerminal({ name: terminalName });
-      terminal.show(true);
+      const acpClient = AcpClient.getInstance();
 
-      // Retrieve the ACP session ID for persistence
-      const acpSessionId = await sessionManager.getAcpSessionId();
+      // Send the fast-forward prompt via ACP
+      await acpClient.sendMessage(`use openspec ff skill to populate ${changeId}`);
 
-      const prompt = `use openspec ff skill to populate ${changeId}`;
-      const sessionIdArg = acpSessionId ? ` --session-id ${acpSessionId}` : '';
-      terminal.sendText(`opencode run --attach localhost:4099${sessionIdArg} --continue ${JSON.stringify(prompt)}`, true);
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       ErrorHandler.handle(err, 'starting fast forward from chat', true);
@@ -1156,125 +1166,32 @@ export function registerCommands(context: vscode.ExtensionContext, runtime: Exte
         runtime.chatProvider.setCurrentPhase('implementation');
       }
 
-      const tasksPerRun = count || 1;
-
-      const ready = await ensureLocalOpenCodeServerReady();
-      if (!ready) {
-        if (runtime.chatProvider) {
-          runtime.chatProvider.addMessage({
-            id: `error_${Date.now()}`,
-            role: 'system',
-            content: 'OpenCode server is not responding on port 4099. Please start the server first.',
-            timestamp: Date.now()
-          });
-        }
-        return;
+      // Ensure ACP is connected and has a session
+      const acpReady = await ensureAcpReady(runtime.chatProvider);
+      
+      if (!acpReady.success) {
+        throw new Error(acpReady.error || 'Failed to connect to ACP');
       }
 
-      // Retrieve the ACP session ID for attachment
-      const acpSessionId = await sessionManager.getAcpSessionId();
+      const acpClient = AcpClient.getInstance();
 
-      // Store extra prompt in session for potential reuse
+      // Build the apply prompt
+      let prompt = `use openspec apply-change skill to implement tasks for ${changeId}`;
+      if (count && count > 1) {
+        prompt += ` --count ${count}`;
+      }
       if (userExtraPrompt && userExtraPrompt.trim()) {
+        prompt += `. Additional context: ${userExtraPrompt.trim()}`;
+        // Store extra prompt in session for potential reuse
         await sessionManager.setExtraPrompt(userExtraPrompt.trim());
       }
 
-      // Execute ralph script with output capture and display in chat
-      const ralphService = RalphService.getInstance();
-
-      // Clear previous script output
-      if (runtime.chatProvider) {
-        runtime.chatProvider.clearScriptOutput();
-        runtime.chatProvider.updateScriptExecutionStatus('running', 'Starting ralph execution...');
-      }
-
-      // Set up output handler for real-time display
-      const outputDisposable = ralphService.onOutput((line) => {
-        if (runtime.chatProvider) {
-          runtime.chatProvider.addScriptOutput(line);
-        }
-      });
-
-      // Set up progress handler for task progress indication
-      const progressDisposable = ralphService.onProgress((progress) => {
-        if (runtime.chatProvider) {
-          const progressMessage = `Progress: ${progress.current}/${progress.total} - ${progress.message}`;
-          runtime.chatProvider.updateScriptExecutionStatus('running', progressMessage);
-        }
-      });
-
-      // Add disposables to context
-      context.subscriptions.push(outputDisposable, progressDisposable);
-
-      // Execute the script with extra prompt support
-      const result = await ralphService.execute({
-        changeId: changeId,
-        count: tasksPerRun,
-        sessionId: acpSessionId,
-        extraPrompt: userExtraPrompt?.trim() || undefined,
-        attachUrl: 'http://localhost:4099'
-      });
-
-      // Update status based on result with enhanced error details
-      if (runtime.chatProvider) {
-        if (result.success) {
-          runtime.chatProvider.updateScriptExecutionStatus('completed', 'Ralph execution completed successfully');
-        } else {
-          // Provide detailed error information
-          const errorDetails = result.error || `Exit code: ${result.exitCode}`;
-          const errorMessage = result.exitCode === null
-            ? `Ralph execution failed: Process could not be started (${errorDetails})`
-            : `Ralph execution failed with exit code ${result.exitCode}`;
-          runtime.chatProvider.updateScriptExecutionStatus('error', errorMessage);
-
-          // Show error output summary if available
-          const errorLines = result.output.filter(line => line.type === 'stderr' || line.type === 'error');
-          if (errorLines.length > 0) {
-            const errorSummary = errorLines.slice(-3).map(line => line.content).join('\n');
-            runtime.chatProvider.addMessage({
-              id: `msg_${Date.now()}_error_summary`,
-              role: 'system',
-              content: `**Error Summary:**\n\`\`\`\n${errorSummary}\n\`\`\``,
-              timestamp: Date.now()
-            });
-          }
-        }
-      }
-
-      // Clean up output and progress handlers
-      outputDisposable.dispose();
-      progressDisposable.dispose();
-
-      // Add summary message with retry option for failures
-      if (runtime.chatProvider) {
-        if (result.success) {
-          const duration = result.duration ? ` (${Math.round(result.duration / 1000)}s)` : '';
-          const tasksCompleted = result.tasksCompleted ? ` - ${result.tasksCompleted} tasks completed` : '';
-          runtime.chatProvider.addMessage({
-            id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-            role: 'system',
-            content: `Apply phase completed successfully for "${changeId}"${duration}${tasksCompleted}`,
-            timestamp: Date.now()
-          });
-        } else {
-          // Add error message with retry action
-          runtime.chatProvider.addMessage({
-            id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-            role: 'system',
-            content: `Apply phase failed for "${changeId}".\n\n**Possible causes:**\n- OpenCode server connection issue\n- Syntax errors in the code\n- Missing dependencies\n- Task verification failed\n\nCheck the script output above for details. You can retry with adjusted context if needed.`,
-            timestamp: Date.now(),
-            metadata: {
-              isError: true,
-              retryAction: 'apply'
-            }
-          });
-        }
-      }
+      // Send the apply prompt via ACP
+      await acpClient.sendMessage(prompt);
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       ErrorHandler.handle(err, 'applying change from chat', true);
       if (runtime.chatProvider) {
-        runtime.chatProvider.updateScriptExecutionStatus('error', `Error: ${err.message}`);
         runtime.chatProvider.addMessage({
           id: `error_${Date.now()}`,
           role: 'system',
@@ -1330,22 +1247,24 @@ export function registerCommands(context: vscode.ExtensionContext, runtime: Exte
         runtime.chatProvider.setCurrentPhase('implementation');
       }
 
-      // Delegate to existing archive command logic
-      await vscode.commands.executeCommand(Commands.archiveChange, { label: changeId, path: undefined });
+      // Ensure ACP is connected and has a session
+      const acpReady = await ensureAcpReady(runtime.chatProvider);
+      
+      if (!acpReady.success) {
+        throw new Error(acpReady.error || 'Failed to connect to ACP');
+      }
+
+      const acpClient = AcpClient.getInstance();
+
+      // Build the archive prompt
+      let prompt = `use openspec skill to archive the change ${changeId}. Let me know if the tasks are completed.`;
+
+      // Send the archive prompt via ACP
+      await acpClient.sendMessage(prompt);
 
       // Clean up sessions associated with this change after archiving
       await sessionManager.cleanupSessionsForChange(changeId);
       ErrorHandler.debug(`Cleaned up sessions for archived change via chat: ${changeId}`);
-
-      // Notify user of completion
-      if (runtime.chatProvider) {
-        runtime.chatProvider.addMessage({
-          id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-          role: 'system',
-          content: `Change "${changeId}" has been archived and associated sessions have been cleaned up.`,
-          timestamp: Date.now()
-        });
-      }
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       ErrorHandler.handle(err, 'archiving change from chat', true);

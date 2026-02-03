@@ -13,8 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ServerLifecycle service for auto-starting and monitoring OpenCode server
 - AcpClient for JSON-RPC communication with OpenCode ACP server
 - SessionManager for persistent conversation history across reloads
-- ChatProvider with message streaming, tool call visualization, and phase tracking
-- Slash commands: `/new`, `/ff`, `/apply`, `/archive`, `/status`, `/clear`
+- Chat view with message streaming and phase tracking
 - Artifact renderer for displaying proposal.md, design.md, tasks.md in chat context
 - Syntax highlighting for code blocks in chat messages
 - Configuration settings for chat behavior, debug mode, and offline mode

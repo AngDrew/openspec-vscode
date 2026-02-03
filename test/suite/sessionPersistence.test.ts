@@ -299,40 +299,6 @@ suite('Session Persistence Across Reloads Test Suite', () => {
     }
   });
 
-  test('Session restoration with tool call data', async () => {
-    sessionManager.initialize(mockContext);
-    await sessionManager.createSession('tool-call-persistence-test');
-
-    // Add message with tool calls
-    await sessionManager.addMessage({
-      role: 'assistant',
-      content: 'I will help you with that',
-      toolCalls: [{
-        id: 'tool-1',
-        tool: 'read_file',
-        params: { path: '/test.txt' },
-        status: 'completed',
-        startTime: Date.now(),
-        endTime: Date.now() + 1000,
-        result: 'file contents'
-      }]
-    });
-
-    // Simulate reload
-    sessionManager.dispose();
-    (SessionManager as any).instance = undefined;
-    sessionManager = SessionManager.getInstance();
-    sessionManager.initialize(mockContext);
-
-    // Restore and verify tool calls
-    const restored = await sessionManager.restoreSession();
-    assert.ok(restored, 'Should restore session');
-    assert.strictEqual(restored!.messages.length, 1, 'Should have 1 message');
-    assert.ok(restored!.messages[0].toolCalls, 'Message should have tool calls');
-    assert.strictEqual(restored!.messages[0].toolCalls!.length, 1, 'Should have 1 tool call');
-    assert.strictEqual(restored!.messages[0].toolCalls![0].tool, 'read_file', 'Tool name should persist');
-    assert.strictEqual(restored!.messages[0].toolCalls![0].status, 'completed', 'Tool status should persist');
-  });
 
   test('Session cleanup does not affect current session on reload', async () => {
     sessionManager.initialize(mockContext);

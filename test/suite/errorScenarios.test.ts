@@ -1,6 +1,5 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
-import { ChatProvider, ChatMessage } from '../../src/providers/chatProvider';
 import { SessionManager } from '../../src/services/sessionManager';
 import { AcpClient } from '../../src/services/acpClient';
 import { ServerLifecycle } from '../../src/services/serverLifecycle';
@@ -8,17 +7,14 @@ import { PortManager } from '../../src/services/portManager';
 import { ErrorHandler } from '../../src/utils/errorHandler';
 
 suite('Error Scenario Integration Test Suite', () => {
-  let chatProvider: ChatProvider;
   let sessionManager: SessionManager;
   let acpClient: AcpClient;
   let serverLifecycle: ServerLifecycle;
   let portManager: PortManager;
   let mockContext: vscode.ExtensionContext;
   let globalState: Map<string, any>;
-  const testExtensionUri = vscode.Uri.file('test-extension');
 
   setup(() => {
-    chatProvider = new ChatProvider(testExtensionUri);
     sessionManager = SessionManager.getInstance();
     acpClient = AcpClient.getInstance();
     serverLifecycle = ServerLifecycle.getInstance();
@@ -46,35 +42,12 @@ suite('Error Scenario Integration Test Suite', () => {
 
     sessionManager.initialize(mockContext);
 
-    acpClient['isConnected'] = false;
-    acpClient['requestId'] = 0;
-    acpClient['pendingRequests'].clear();
-    acpClient['messageListeners'] = [];
-    acpClient['connectionListeners'] = [];
-    acpClient['toolCallListeners'] = [];
-    acpClient['responseListeners'] = [];
-    acpClient['activeToolCalls'].clear();
-    acpClient['currentResponseBuffer'] = '';
-    acpClient['currentResponse'] = undefined;
-    acpClient['abortController'] = undefined;
-    acpClient['activeStreamMessageId'] = undefined;
-    acpClient['sseReconnectAttempts'] = 0;
     acpClient['messageQueue'] = [];
     acpClient['offlineState'] = { isOffline: false, pendingMessageCount: 0 };
     acpClient['offlineListeners'] = [];
-
-    if (acpClient['sseReconnectTimer']) {
-      clearTimeout(acpClient['sseReconnectTimer']);
-      acpClient['sseReconnectTimer'] = undefined;
-    }
-    if (acpClient['offlineRetryTimer']) {
-      clearInterval(acpClient['offlineRetryTimer']);
-      acpClient['offlineRetryTimer'] = undefined;
-    }
   });
 
   teardown(async () => {
-    chatProvider.dispose();
     sessionManager.dispose();
     acpClient.dispose();
     serverLifecycle.dispose();
@@ -240,33 +213,6 @@ suite('Error Scenario Integration Test Suite', () => {
     assert.ok(session!.messages.length >= 0, 'Should handle invalid messages gracefully');
   });
 
-  test('ChatProvider should handle webview disposal', () => {
-    try {
-      chatProvider.dispose();
-      assert.ok(true, 'Should dispose without errors');
-    } catch (error) {
-      assert.fail('Should not throw on dispose');
-    }
-  });
-
-  test('ChatProvider should handle message operations when webview not ready', () => {
-    try {
-      chatProvider.addMessage({
-        id: 'test',
-        role: 'user',
-        content: 'Test message',
-        timestamp: Date.now()
-      });
-
-      chatProvider.updateMessage('test', 'Updated content', false);
-      chatProvider.clearToolCalls();
-
-      assert.ok(true, 'Should handle operations when webview not ready');
-    } catch (error) {
-      assert.fail('Should not throw when webview not ready');
-    }
-  });
-
   test('ErrorHandler should handle various error types', () => {
     const errors = [
       new Error('Standard error'),
@@ -293,8 +239,6 @@ suite('Error Scenario Integration Test Suite', () => {
   test('AcpClient should handle streaming cancellation during active stream', () => {
     acpClient['activeStreamMessageId'] = 'stream-test';
     acpClient['currentResponseBuffer'] = 'Partial content during streaming';
-    acpClient['abortController'] = new AbortController();
-
     const result = acpClient.cancelStreaming();
 
     assert.ok(result, 'Should return cancelled response');
@@ -302,27 +246,6 @@ suite('Error Scenario Integration Test Suite', () => {
     assert.strictEqual(acpClient['activeStreamMessageId'], undefined, 'Should clear active stream');
   });
 
-  test('AcpClient should handle tool call with missing fields', () => {
-    const toolCalls: any[] = [];
-    acpClient.onToolCall((tc) => toolCalls.push(tc));
-
-    const incompleteToolCalls = [
-      { id: 'tc-1' },
-      { tool: 'test' },
-      { id: 'tc-2', tool: 'test', params: null },
-      {},
-    ];
-
-    for (const tc of incompleteToolCalls) {
-      try {
-        acpClient['notifyToolCallListeners'](tc as any);
-      } catch (error) {
-        assert.fail('Should not throw for incomplete tool call');
-      }
-    }
-
-    assert.ok(toolCalls.length > 0, 'Should handle incomplete tool calls');
-  });
 
   test('SessionManager should handle phase transitions with invalid phases', async () => {
     await sessionManager.createSession('phase-test');
