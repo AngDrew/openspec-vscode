@@ -33,7 +33,8 @@ function printHelp() {
     `  --count <n>      Include up to N tasks per opencode run iteration (default: 1)\n\nEnv:\n` +
     `  OPENCODE_ATTACH_URL  Same as --attach\n` +
     `  OPENSPEC_CHANGE      Same as --change\n` +
-    `  OPENCODE_NPX_PKG     Fallback npx package (default: opencode-ai@1.1.44)\n`
+    `  OPENCODE_NPX_PKG     Fallback npx package (default: opencode-ai@1.1.44)\n` +
+    `  OPENSPEC_EXTRA_PROMPT  Additional context/prompt to append to the task prompt\n`
   );
 }
 
@@ -418,7 +419,10 @@ for (let iter = 1; iter <= maxItersSafe; iter++) {
   }
   opencodeArgs.push('use skills openspec-apply-change to apply');
 
-  const prompt =
+  // Check for extra prompt from environment variable
+  const extraPrompt = process.env.OPENSPEC_EXTRA_PROMPT || '';
+
+  let prompt =
     `Target change: ${changeName}\n` +
     `Tasks file: ${tasksFile}\n` +
     `Task IDs (complete in order):\n` +
@@ -434,6 +438,11 @@ for (let iter = 1; iter <= maxItersSafe; iter++) {
     `- If it is a lint/test/qa/review and it fail, fix it\n` +
     `- As you finish each task, mark it done in ${tasksFile} by changing:\n` +
     `- [ ] <id> -> - [x] <id>\n`;
+
+  // Append extra prompt if provided
+  if (extraPrompt.trim()) {
+    prompt += `\n\nAdditional context from user:\n${extraPrompt.trim()}\n`;
+  }
 
   const runRes = runOpencodeWithFallback(opencodeArgs, prompt);
   if (runRes.error) {

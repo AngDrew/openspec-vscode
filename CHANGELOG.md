@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Chat UI for conversational OpenSpec workflows with OpenCode AI
+- PortManager service for dynamic port allocation (4000-4999 range)
+- ServerLifecycle service for auto-starting and monitoring OpenCode server
+- AcpClient for JSON-RPC communication with OpenCode ACP server
+- SessionManager for persistent conversation history across reloads
+- ChatProvider with message streaming, tool call visualization, and phase tracking
+- Slash commands: `/new`, `/ff`, `/apply`, `/archive`, `/status`, `/clear`
+- Artifact renderer for displaying proposal.md, design.md, tasks.md in chat context
+- Syntax highlighting for code blocks in chat messages
+- Configuration settings for chat behavior, debug mode, and offline mode
+- Comprehensive troubleshooting guide (TROUBLESHOOTING.md)
+
+### Changed
+- Enhanced README with Chat UI documentation and usage examples
+
 ## [1.3.0] - 2026-02-02
 
 ### Added

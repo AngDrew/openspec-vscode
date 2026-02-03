@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src {{CSP_SOURCE}} 'unsafe-inline'; script-src 'nonce-{{NONCE}}';">
+  <title>OpenSpec Chat</title>
+  <link href="{{STYLES_URI}}" rel="stylesheet">
+</head>
+<body>
+  <div class="chat-container">
+    <!-- Header -->
+    <div class="chat-header">
+      <div class="chat-header-left">
+        <h1>OpenSpec Chat</h1>
+        <span class="connection-status" id="connectionStatus" title="Disconnected">●</span>
+      </div>
+      <div class="chat-header-controls">
+        <button class="header-button" id="clearBtn" title="Clear chat history">
+          <span class="button-icon">🗑</span>
+          Clear
+        </button>
+        <button class="header-button" id="settingsBtn" title="Chat settings">
+          <span class="button-icon">⚙</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Tool Calls Panel (Collapsible) -->
+    <div class="tool-calls-panel" id="toolCallsPanel">
+      <div class="tool-calls-header" id="toolCallsHeader">
+        <span class="tool-calls-title">
+          <span class="tool-calls-icon">🔧</span>
+          Tool Calls
+          <span class="tool-calls-count" id="toolCallsCount"></span>
+        </span>
+        <span class="tool-calls-toggle" id="toolCallsToggle">▼</span>
+      </div>
+      <div class="tool-calls-content" id="toolCallsContent">
+        <div class="tool-calls-empty" id="toolCallsEmpty">No tool calls yet</div>
+        <div class="tool-calls-list" id="toolCallsList"></div>
+      </div>
+    </div>
+
+    <!-- Phase Tracker -->
+    <div class="phase-tracker" id="phaseTracker">
+      <div class="phase-item" data-phase="new">
+        <div class="phase-indicator">
+          <span class="phase-number">1</span>
+          <span class="phase-check">✓</span>
+        </div>
+        <span class="phase-label">New Change</span>
+      </div>
+      <div class="phase-connector"></div>
+      <div class="phase-item" data-phase="drafting">
+        <div class="phase-indicator">
+          <span class="phase-number">2</span>
+          <span class="phase-check">✓</span>
+        </div>
+        <span class="phase-label">Drafting</span>
+      </div>
+      <div class="phase-connector"></div>
+      <div class="phase-item" data-phase="implementation">
+        <div class="phase-indicator">
+          <span class="phase-number">3</span>
+          <span class="phase-check">✓</span>
+        </div>
+        <span class="phase-label">Implementation</span>
+      </div>
+    </div>
+
+    <!-- Messages Container -->
+    <div class="messages-container" id="messagesContainer">
+      <div class="empty-state" id="emptyState">
+        <div class="empty-state-icon">💬</div>
+        <h2 class="empty-state-title">Welcome to OpenSpec Chat</h2>
+        <p class="empty-state-body">Start a conversation to begin working with OpenSpec</p>
+        <div class="empty-state-hints">
+          <div class="hint-item">
+            <span class="hint-command">/new</span>
+            <span class="hint-desc">Create a new change</span>
+          </div>
+          <div class="hint-item">
+            <span class="hint-command">/ff</span>
+            <span class="hint-desc">Fast-forward artifacts</span>
+          </div>
+          <div class="hint-item">
+            <span class="hint-command">/apply</span>
+            <span class="hint-desc">Apply changes</span>
+          </div>
+          <div class="hint-item">
+            <span class="hint-command">/help</span>
+            <span class="hint-desc">Show all commands</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Typing Indicator -->
+    <div class="typing-indicator" id="typingIndicator" style="display: none;">
+      <div class="typing-bubbles">
+        <span></span>
+        <span></span>
+        <span></span>
+      </div>
+      <span class="typing-text">AI is thinking...</span>
+    </div>
+
+    <!-- Input Container -->
+    <div class="input-container">
+      <div class="input-wrapper">
+        <textarea 
+          id="messageInput" 
+          placeholder="Type your message... (Shift+Enter for new line)" 
+          rows="1"
+          aria-label="Message input"
+        ></textarea>
+        <div class="input-actions">
+          <button class="input-action-button" id="attachBtn" title="Attach file">
+            <span class="button-icon">📎</span>
+          </button>
+        </div>
+      </div>
+      <button id="sendBtn" class="send-button" aria-label="Send message" title="Send message (Enter)">
+        <span class="send-icon">➤</span>
+      </button>
+    </div>
+
+    <!-- Status Bar -->
+    <div class="status-bar" id="statusBar">
+      <span class="status-item" id="sessionStatus">No active session</span>
+      <span class="status-separator">|</span>
+      <span class="status-item" id="messageCount">0 messages</span>
+    </div>
+  </div>
+
+  <script nonce="{{NONCE}}" src="{{SCRIPT_URI}}"></script>
+</body>
+</html>

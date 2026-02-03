@@ -8,6 +8,7 @@
 
 Spec-driven development inside VS Code, powered by OpenSpec + OpenCode.
 
+- **NEW: Chat UI** - Have natural conversations with OpenCode AI to create changes, draft artifacts, and implement code
 - Browse `openspec/changes/*` and `openspec/specs/*` from the Activity Bar
 - Read `proposal.md`, `design.md`, and `tasks.md` in a focused details webview
 - Fast-forward scaffold-only changes into full artifacts
@@ -21,11 +22,14 @@ Note: this extension is built for OpenCode. Other agentic CLIs/runners (Claude C
 This extension is built around a very specific workflow:
 
 1. Plan mode: use OpenCode to discuss the request until you are satisfied with what you want.
+   - **Chat UI**: Open the chat panel to have a natural conversation with OpenCode AI
 2. Build mode: ask OpenCode to write the spec change artifacts.
 3. Fast-forward: close OpenCode, then click the Fast-Forward icon on the newly created scaffold-only change.
    - This continues the previous OpenCode session and generates all artifacts while keeping the context window efficient.
+   - **Chat UI**: Use the `/ff` command or click the Fast-Forward action button
 4. Apply change (Ralph loop): start applying tasks from the extension.
    - Optionally set a task count per invocation (`--count`) to save time.
+   - **Chat UI**: Use the `/apply` command or click the Apply action button
 5. Watch the magic: the loop works on up to `--count` tasks per run.
    - Each loop spawns a fresh OpenCode run (fresh context per batch), which helps reduce drift and hallucinations.
 6. Monitor in real time: open `http://localhost:4099` to watch progress.
@@ -40,6 +44,12 @@ Graceful behavior:
 
 The extension to automate OpenSpec with:
 
+- **Chat UI Panel**: Full-featured chat interface for natural conversations with OpenCode AI
+  - Message history with markdown rendering and syntax highlighting
+  - Real-time streaming responses with typing indicators
+  - Action buttons for workflow commands (New Change, Fast-Forward, Apply, Archive)
+  - Tool call visualization showing file reads, searches, and other operations
+  - Phase tracker showing current workflow progress
 - OpenSpec Explorer tree: active changes, archived changes, and workspace specs
 - Change details webview: renders artifacts and previews other files in a change folder
 - Opencode CLI-first actions: start OpenCode server, fast-forward artifacts, apply tasks, archive changes, draft requirements interactively
@@ -77,10 +87,76 @@ Runner fallback: if `opencode` is not on your PATH, the bundled runner can fall 
 opencode serve --port 4099 --print-logs
 ```
 
-4. Create/spec a change: run `OpenSpec: New Change (OpenCode)` (plan mode first).
-5. Fast-forward artifacts: click `Fast-Forward Change` on scaffold-only changes.
-6. Apply tasks: click `Apply Change` and enter how many tasks to include per OpenCode run (batch size within the same parent task section; default 1).
-7. Monitor: run `OpenSpec: Open OpenCode UI` or open `http://localhost:4099`.
+4. Open the Chat UI: run `OpenSpec: Open Chat` or use the chat icon in the OpenSpec view.
+5. Create/spec a change: type `/new` in chat or run `OpenSpec: New Change (OpenCode)` (plan mode first).
+6. Fast-forward artifacts: type `/ff` in chat or click `Fast-Forward Change` on scaffold-only changes.
+7. Apply tasks: type `/apply` in chat or click `Apply Change` and enter how many tasks to include per OpenCode run (batch size within the same parent task section; default 1).
+8. Monitor: run `OpenSpec: Open OpenCode UI` or open `http://localhost:4099`.
+
+## Chat UI
+
+The Chat UI provides a conversational interface for OpenSpec workflows:
+
+### Features
+
+- **Natural Conversations**: Chat with OpenCode AI using natural language to create changes and implement features
+- **Message History**: Persistent conversation history that survives VS Code reloads
+- **Markdown Rendering**: AI responses are rendered with full markdown support including code blocks with syntax highlighting
+- **Streaming Responses**: Real-time streaming with typing indicators
+- **Tool Call Visualization**: See what tools OpenCode is using (file reads, searches, etc.) in an expandable panel
+- **Phase Tracker**: Visual progress indicator showing current workflow phase (New Change, Drafting, Implementation)
+- **Action Buttons**: Quick-access buttons for common actions like Fast-Forward and Apply
+
+### Chat Commands
+
+Type these commands in the chat input:
+
+#### Workflow Commands
+
+- `/new` - Start creating a new change
+  - Initiates the plan mode conversation with OpenCode
+  - The AI will ask questions to understand your requirements
+  - Once complete, a scaffold change folder is created
+  
+- `/ff` or `/fastforward` - Fast-forward a scaffold-only change
+  - Continues the OpenCode session to generate all artifacts
+  - Only works on changes with just `.openspec.yaml` (no tasks.md yet)
+  - Automatically populates proposal.md, design.md, specs/, and tasks.md
+  
+- `/apply` - Apply tasks from the current change
+  - Starts the Ralph loop to implement tasks from tasks.md
+  - You'll be prompted for batch size (how many tasks per run)
+  - Tasks are applied in order within the same parent section
+  
+- `/archive` - Archive the current change
+  - Moves the change from `openspec/changes/` to `openspec/archive/`
+  - Preserves all artifacts and conversation history
+  
+#### Utility Commands
+
+- `/status` - Show current workflow phase and status
+  - Displays which phase you're in: New Change, Drafting, or Implementation
+  - Shows the current change ID and session status
+  
+- `/clear` - Clear chat history
+  - Removes all messages from the current conversation
+  - Does not affect saved changes or artifacts
+
+### Opening the Chat
+
+- Run command: `OpenSpec: Open Chat` (or press `Ctrl+Shift+P` and type "Open Chat")
+- Click the chat icon in the OpenSpec Explorer view
+- Use keyboard shortcut (configurable in settings under `openspec.chat.keybinding`)
+
+### Chat Workflow Example
+
+1. **Start a conversation**: Open the chat and describe what you want to build
+2. **Create a change**: Type `/new` and answer the AI's questions
+3. **Generate artifacts**: After the scaffold is created, type `/ff` to generate all spec files
+4. **Review**: Check the generated proposal.md, design.md, and tasks.md
+5. **Implement**: Type `/apply` to start implementing tasks
+6. **Monitor**: Watch progress in the chat and at `http://localhost:4099`
+7. **Complete**: When done, type `/archive` to archive the change
 
 ## Apply Change (Ralph loop)
 
@@ -108,6 +184,50 @@ It runs a continuation prompt like:
 
 ```bash
 opencode run --attach localhost:4099 --continue "use openspec ff skill to populate <changeId>"
+```
+
+## Configuration
+
+Configure OpenSpec settings in VS Code: open Settings (File > Preferences > Settings or `Ctrl+,`) and search for "openspec".
+
+### Chat Settings
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `openspec.chat.enabled` | boolean | `true` | Enable the chat UI feature for OpenSpec workflow |
+| `openspec.chat.autoStartServer` | boolean | `true` | Automatically start OpenCode server when opening chat |
+| `openspec.chat.maxMessages` | number | `100` | Maximum number of messages to store in chat history (10-500) |
+| `openspec.chat.streamingEnabled` | boolean | `true` | Enable streaming responses from AI |
+| `openspec.chat.showToolCalls` | boolean | `true` | Show tool call panel in chat interface |
+| `openspec.chat.showTimestamps` | boolean | `true` | Show timestamps on chat messages |
+
+### Debug Settings
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `openspec.debug.enabled` | boolean | `false` | Enable debug mode for detailed logging |
+| `openspec.debug.structuredLogging` | boolean | `true` | Use structured JSON format when exporting logs |
+
+### Offline Mode Settings
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `openspec.offlineMode.enabled` | boolean | `true` | Enable offline mode to queue messages when server is unavailable |
+| `openspec.offlineMode.maxQueueSize` | number | `50` | Maximum number of messages to queue when offline (10-100) |
+| `openspec.offlineMode.retryInterval` | number | `30` | Interval in seconds between offline retry attempts (10-300) |
+
+### Settings.json Example
+
+```json
+{
+  "openspec.chat.enabled": true,
+  "openspec.chat.autoStartServer": true,
+  "openspec.chat.maxMessages": 100,
+  "openspec.chat.streamingEnabled": true,
+  "openspec.chat.showToolCalls": true,
+  "openspec.debug.enabled": false,
+  "openspec.offlineMode.enabled": true
+}
 ```
 
 ## Known limitations / bugs

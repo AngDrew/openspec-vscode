@@ -19,7 +19,9 @@
     "Other"
   ],
   "activationEvents": [
-    "onStartupFinished"
+    "onStartupFinished",
+    "onCommand:openspec.chat.open",
+    "onView:openspecChat"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -43,6 +45,12 @@
           "id": "openspecWelcome",
           "name": "OpenSpec",
           "when": "!openspec:initialized"
+        },
+        {
+          "id": "openspecChat",
+          "name": "OpenSpec Chat",
+          "when": "openspec:initialized && openspec:chatEnabled",
+          "icon": "$(comment-discussion)"
         }
       ]
     },
@@ -107,6 +115,47 @@
       {
         "command": "openspec.opencode.runRunnerAttached",
         "title": "OpenSpec: Run Runner Attached"
+      },
+      {
+        "command": "openspec.chat.open",
+        "title": "OpenSpec: Open Chat",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "openspec.chat.messageSent",
+        "title": "OpenSpec: Send Chat Message"
+      },
+      {
+        "command": "openspec.chat.cancelStreaming",
+        "title": "OpenSpec: Cancel Streaming"
+      },
+      {
+        "command": "openspec.chat.newChange",
+        "title": "OpenSpec: New Change (Chat)"
+      },
+      {
+        "command": "openspec.chat.fastForward",
+        "title": "OpenSpec: Fast Forward (Chat)"
+      },
+      {
+        "command": "openspec.chat.apply",
+        "title": "OpenSpec: Apply Change (Chat)"
+      },
+      {
+        "command": "openspec.chat.archive",
+        "title": "OpenSpec: Archive Change (Chat)"
+      },
+      {
+        "command": "openspec.debug.exportLogs",
+        "title": "OpenSpec: Export Debug Logs"
+      },
+      {
+        "command": "openspec.debug.toggle",
+        "title": "OpenSpec: Toggle Debug Mode"
+      },
+      {
+        "command": "openspec.debug.showOutput",
+        "title": "OpenSpec: Show Debug Output"
       }
     ],
     "menus": {
@@ -150,7 +199,90 @@
         }
       ]
     },
-    "keybindings": []
+    "keybindings": [
+      {
+        "command": "openspec.chat.open",
+        "key": "ctrl+shift+o",
+        "mac": "cmd+shift+o",
+        "when": "openspec:initialized"
+      },
+      {
+        "command": "openspec.chat.messageSent",
+        "key": "enter",
+        "when": "openspec:chatFocus && !openspec:inputEmpty"
+      },
+      {
+        "command": "openspec.chat.cancelStreaming",
+        "key": "escape",
+        "when": "openspec:streaming"
+      }
+    ],
+    "configuration": {
+      "title": "OpenSpec",
+      "properties": {
+        "openspec.chat.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable the chat UI feature for OpenSpec workflow"
+        },
+        "openspec.chat.autoStartServer": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically start OpenCode server when opening chat"
+        },
+        "openspec.chat.maxMessages": {
+          "type": "number",
+          "default": 100,
+          "minimum": 10,
+          "maximum": 500,
+          "description": "Maximum number of messages to store in chat history"
+        },
+        "openspec.chat.streamingEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable streaming responses from AI"
+        },
+        "openspec.chat.showToolCalls": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show tool call panel in chat interface"
+        },
+        "openspec.chat.showTimestamps": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show timestamps on chat messages"
+        },
+        "openspec.debug.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable debug mode for detailed logging"
+        },
+        "openspec.debug.structuredLogging": {
+          "type": "boolean",
+          "default": true,
+          "description": "Use structured JSON format when exporting logs"
+        },
+        "openspec.offlineMode.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable offline mode to queue messages when server is unavailable"
+        },
+        "openspec.offlineMode.maxQueueSize": {
+          "type": "number",
+          "default": 50,
+          "minimum": 10,
+          "maximum": 100,
+          "description": "Maximum number of messages to queue when offline"
+        },
+        "openspec.offlineMode.retryInterval": {
+          "type": "number",
+          "default": 30,
+          "minimum": 10,
+          "maximum": 300,
+          "description": "Interval in seconds between offline retry attempts"
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
@@ -177,6 +309,7 @@
     "typescript": "^4.9.3"
   },
   "dependencies": {
+    "highlight.js": "^11.11.1",
     "marked": "^5.0.0"
   }
 }

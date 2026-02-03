@@ -17,5 +17,13 @@ export const Commands = {
   opencodeOpenUi: 'openspec.opencode.openUi',
   opencodeNewChange: 'openspec.opencode.newChange',
   opencodeGenerateRunnerScript: 'openspec.opencode.generateRunnerScript',
-  opencodeRunRunnerAttached: 'openspec.opencode.runRunnerAttached'
+  opencodeRunRunnerAttached: 'openspec.opencode.runRunnerAttached',
+  showServerStatus: 'openspec.showServerStatus',
+  openChat: 'openspec.chat.open',
+  chatMessageSent: 'openspec.chat.messageSent',
+  chatCancelStreaming: 'openspec.chat.cancelStreaming',
+  chatNewChange: 'openspec.chat.newChange',
+  chatFastForward: 'openspec.chat.fastForward',
+  chatApply: 'openspec.chat.apply',
+  chatArchive: 'openspec.chat.archive'
 } as const;

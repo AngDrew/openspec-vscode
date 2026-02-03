@@ -5,6 +5,11 @@ import { Commands } from '../constants/commands';
 import { WorkspaceUtils } from '../utils/workspace';
 import { ErrorHandler } from '../utils/errorHandler';
 import { ExtensionRuntimeState } from './runtime';
+import { ServerLifecycle } from '../services/serverLifecycle';
+import { SessionManager } from '../services/sessionManager';
+import { AcpClient } from '../services/acpClient';
+import { RalphService } from '../services/ralphService';
+import { ChatMessage } from '../providers/chatProvider';
 
 async function sleep(ms: number): Promise<void> {
   await new Promise(resolve => setTimeout(resolve, ms));
@@ -45,7 +50,7 @@ function pickNodeCommand(): string {
 
 export function registerCommands(context: vscode.ExtensionContext, runtime: ExtensionRuntimeState): void {
   // View details command
-  const viewDetailsCommand = vscode.commands.registerCommand(Commands.viewDetails, (item) => {
+  const viewDetailsCommand = vscode.commands.registerCommand(Commands.viewDetails, async (item) => {
     if (!runtime.webviewProvider) {
       vscode.window.showErrorMessage('OpenSpec details panel is not available yet');
       return;
@@ -53,15 +58,35 @@ export function registerCommands(context: vscode.ExtensionContext, runtime: Exte
 
     if (item && item.path) {
       runtime.webviewProvider.showDetails(item);
+      
+      // Connect to chat session - update context
+      const sessionManager = SessionManager.getInstance();
+      const changeId = item.label || item.changeId;
+      if (changeId) {
+        await sessionManager.setChangeId(changeId);
+        await sessionManager.addMessage({
+          role: 'system',
+          content: `Viewing details for change: ${changeId}`,
+          metadata: { changeId }
+        });
+      }
     } else {
       vscode.window.showWarningMessage('No change selected');
     }
   });
 
   // List changes command (refresh)
-  const listChangesCommand = vscode.commands.registerCommand(Commands.listChanges, () => {
+  const listChangesCommand = vscode.commands.registerCommand(Commands.listChanges, async () => {
     runtime.explorerProvider?.refresh();
     vscode.commands.executeCommand(Commands.explorerFocus);
+    
+    // Connect to chat session
+    const sessionManager = SessionManager.getInstance();
+    await sessionManager.addMessage({
+      role: 'system',
+      content: 'Refreshed OpenSpec changes list',
+      metadata: {}
+    });
   });
 
   // Apply change command
@@ -71,6 +96,34 @@ export function registerCommands(context: vscode.ExtensionContext, runtime: Exte
       return;
     }
 
+    const sessionManager = SessionManager.getInstance();
+    const changeId = item.label;
+
+    // Maintain conversation context - set change ID and phase
+    await sessionManager.setChangeId(changeId);
+    await sessionManager.setPhase('implementation');
+    await sessionManager.addMessage({
+      role: 'system',
+      content: `Starting Apply phase for change: ${changeId}`,
+      metadata: { changeId, phase: 'implementation' }
+    });
+
+    // Notify chat UI
+    if (runtime.chatProvider) {
+      runtime.chatProvider.addMessage({
+        id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        role: 'system',
+        content: `Applying change "${changeId}". Opening terminal to run tasks...`,
+        timestamp: Date.now()
+      });
+      runtime.chatProvider.updatePhaseTracker([
+        { id: 'new', name: 'New Change', status: 'completed' },
+        { id: 'drafting', name: 'Drafting', status: 'completed' },
+        { id: 'implementation', name: 'Implementation', status: 'active' }
+      ]);
+      runtime.chatProvider.setCurrentPhase('implementation');
+    }
+
     // Check tasks.md format before proceeding
     if (typeof item.path === 'string') {
       try {
@@ -78,7 +131,6 @@ export function registerCommands(context: vscode.ExtensionContext, runtime: Exte
 
         if (!validation.isValid) {
           // Tasks file exists but format is invalid or has no valid tasks
-          const changeId = item.label;
           const terminalName = `OpenSpec Fix Format: ${changeId}`;
           const terminal = vscode.window.createTerminal({ name: terminalName });
           terminal.show(true);
@@ -151,10 +203,14 @@ export function registerCommands(context: vscode.ExtensionContext, runtime: Exte
 
       // Apply is the Ralph loop: generate runner and run attached.
       // This mirrors the spec behavior (task loop parity) using the cross-platform script.
+      // Retrieve the ACP session ID for attachment
+      const acpSessionId = await sessionManager.getAcpSessionId();
+
       await vscode.commands.executeCommand(Commands.opencodeRunRunnerAttached, {
         url: 'http://localhost:4099',
-        changeId: item.label,
-        count
+        changeId: changeId,
+        count,
+        sessionId: acpSessionId
       });
     } catch (error) {
       vscode.window.showErrorMessage(
@@ -183,6 +239,32 @@ export function registerCommands(context: vscode.ExtensionContext, runtime: Exte
       return;
     }
 
+    // Maintain conversation context - set change ID and phase
+    const sessionManager = SessionManager.getInstance();
+    await sessionManager.setChangeId(changeId);
+    await sessionManager.setPhase('drafting');
+    await sessionManager.addMessage({
+      role: 'system',
+      content: `Starting Fast Forward phase for change: ${changeId}`,
+      metadata: { changeId, phase: 'drafting' }
+    });
+
+    // Notify chat UI
+    if (runtime.chatProvider) {
+      runtime.chatProvider.addMessage({
+        id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        role: 'system',
+        content: `Fast-forwarding change "${changeId}". Opening terminal to generate artifacts...`,
+        timestamp: Date.now()
+      });
+      runtime.chatProvider.updatePhaseTracker([
+        { id: 'new', name: 'New Change', status: 'completed' },
+        { id: 'drafting', name: 'Drafting', status: 'active' },
+        { id: 'implementation', name: 'Implementation', status: 'pending' }
+      ]);
+      runtime.chatProvider.setCurrentPhase('drafting');
+    }
+
     try {
       const ready = await ensureLocalOpenCodeServerReady();
       if (!ready) {
@@ -196,8 +278,12 @@ export function registerCommands(context: vscode.ExtensionContext, runtime: Exte
       const terminal = vscode.window.createTerminal({ name: terminalName });
       terminal.show(true);
 
+      // Retrieve the ACP session ID for persistence
+      const acpSessionId = await sessionManager.getAcpSessionId();
+
       const prompt = `use openspec ff skill to populate ${changeId}`;
-      terminal.sendText(`opencode run --attach localhost:4099 --continue ${JSON.stringify(prompt)}`, true);
+      const sessionIdArg = acpSessionId ? ` --session-id ${acpSessionId}` : '';
+      terminal.sendText(`opencode run --attach localhost:4099${sessionIdArg} --continue ${JSON.stringify(prompt)}`, true);
     } catch (error) {
       vscode.window.showErrorMessage(
         `Failed to start fast-forward flow: ${error instanceof Error ? error.message : 'Unknown error'}`
@@ -214,6 +300,32 @@ export function registerCommands(context: vscode.ExtensionContext, runtime: Exte
 
     // Extract the change ID from the label (folder name in kebab case)
     const changeId = item.label;
+
+    // Maintain conversation context - set change ID and phase
+    const sessionManager = SessionManager.getInstance();
+    await sessionManager.setChangeId(changeId);
+    await sessionManager.setPhase('completed');
+    await sessionManager.addMessage({
+      role: 'system',
+      content: `Archiving change: ${changeId}`,
+      metadata: { changeId, phase: 'completed' }
+    });
+
+    // Notify chat UI
+    if (runtime.chatProvider) {
+      runtime.chatProvider.addMessage({
+        id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        role: 'system',
+        content: `Archiving change "${changeId}". Opening terminal to archive...`,
+        timestamp: Date.now()
+      });
+      runtime.chatProvider.updatePhaseTracker([
+        { id: 'new', name: 'New Change', status: 'completed' },
+        { id: 'drafting', name: 'Drafting', status: 'completed' },
+        { id: 'implementation', name: 'Implementation', status: 'completed' }
+      ]);
+      runtime.chatProvider.setCurrentPhase('implementation');
+    }
 
     try {
       const terminalName = `OpenSpec Archive: ${changeId}`;
@@ -246,6 +358,10 @@ export function registerCommands(context: vscode.ExtensionContext, runtime: Exte
 
       // Feed opencode a direct prompt. (Matches existing extension pattern of delegating workflows to opencode.)
       terminal.sendText(`opencode --prompt ${JSON.stringify(prompt)}`, true);
+
+      // Clean up sessions associated with this change after archiving
+      await sessionManager.cleanupSessionsForChange(changeId);
+      ErrorHandler.debug(`Cleaned up sessions for archived change: ${changeId}`);
     } catch (error) {
       vscode.window.showErrorMessage(
         `Failed to start archive flow: ${error instanceof Error ? error.message : 'Unknown error'}`
@@ -300,6 +416,31 @@ export function registerCommands(context: vscode.ExtensionContext, runtime: Exte
   // OpenCode: load "openspec new change" skill prompt
   const newChangeCommand = vscode.commands.registerCommand(Commands.opencodeNewChange, async () => {
     try {
+      // Maintain conversation context - set phase to 'new' for new change flow
+      const sessionManager = SessionManager.getInstance();
+      await sessionManager.setPhase('new');
+      await sessionManager.addMessage({
+        role: 'system',
+        content: 'Starting New Change flow',
+        metadata: { phase: 'new' }
+      });
+
+      // Notify chat UI
+      if (runtime.chatProvider) {
+        runtime.chatProvider.addMessage({
+          id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          role: 'system',
+          content: 'Creating a new OpenSpec change. Opening terminal to start the process...',
+          timestamp: Date.now()
+        });
+        runtime.chatProvider.updatePhaseTracker([
+          { id: 'new', name: 'New Change', status: 'active' },
+          { id: 'drafting', name: 'Drafting', status: 'pending' },
+          { id: 'implementation', name: 'Implementation', status: 'pending' }
+        ]);
+        runtime.chatProvider.setCurrentPhase('new');
+      }
+
       const prompt = 'load openspec new change skill';
 
       const terminalName = 'OpenSpec New Change';
@@ -355,6 +496,8 @@ export function registerCommands(context: vscode.ExtensionContext, runtime: Exte
       let url = 'http://localhost:4099';
       let changeId = '';
       let count: number | undefined;
+      let sessionId: string | undefined;
+      let extraPrompt: string | undefined;
       if (typeof attachUrl === 'string' && attachUrl.trim().length > 0) {
         url = attachUrl.trim();
       } else if (attachUrl && typeof attachUrl === 'object') {
@@ -362,6 +505,8 @@ export function registerCommands(context: vscode.ExtensionContext, runtime: Exte
         const maybeUrl = payload.url;
         const maybeChangeId = payload.changeId;
         const maybeCount = payload.count;
+        const maybeSessionId = payload.sessionId;
+        const maybeExtraPrompt = payload.extraPrompt;
         if (typeof maybeUrl === 'string' && maybeUrl.trim().length > 0) {
           url = maybeUrl.trim();
         }
@@ -380,6 +525,14 @@ export function registerCommands(context: vscode.ExtensionContext, runtime: Exte
 
         if (count !== undefined && (!Number.isSafeInteger(count) || count < 1)) {
           count = undefined;
+        }
+
+        if (typeof maybeSessionId === 'string' && maybeSessionId.trim().length > 0) {
+          sessionId = maybeSessionId.trim();
+        }
+
+        if (typeof maybeExtraPrompt === 'string' && maybeExtraPrompt.trim().length > 0) {
+          extraPrompt = maybeExtraPrompt.trim();
         }
       }
 
@@ -421,13 +574,20 @@ export function registerCommands(context: vscode.ExtensionContext, runtime: Exte
         if (count !== undefined) {
           args.push('--count', String(count));
         }
+        if (sessionId) {
+          args.push('--session-id', sessionId);
+        }
 
         // Provide a sane default for environments where `opencode` isn't on PATH.
         // The runner will attempt direct `opencode` first, then fall back to `npx -y opencode-ai@1.1.44`.
-        const env = {
+        // Pass extra prompt via environment variable for the runner to include in its prompt.
+        const env: NodeJS.ProcessEnv = {
           ...process.env,
           OPENCODE_NPX_PKG: process.env.OPENCODE_NPX_PKG || 'opencode-ai@1.1.44'
         };
+        if (extraPrompt) {
+          env.OPENSPEC_EXTRA_PROMPT = extraPrompt;
+        }
 
         runtime.openCodeRunnerTerminal = vscode.window.createTerminal({
           name: 'OpenCode Runner',
@@ -495,6 +655,721 @@ export function registerCommands(context: vscode.ExtensionContext, runtime: Exte
     ErrorHandler.showOutputChannel();
   });
 
+  // Show server status command (status bar click)
+  const showServerStatusCommand = vscode.commands.registerCommand(Commands.showServerStatus, async () => {
+    const serverLifecycle = ServerLifecycle.getInstance();
+    const health = serverLifecycle.getLastHealth();
+    const status = health?.status || 'unknown';
+    const port = health?.port;
+
+    const items: vscode.QuickPickItem[] = [
+      {
+        label: `Status: ${status}${port ? ` (port ${port})` : ''}`,
+        description: 'Current server status',
+        picked: true
+      },
+      { label: '$(play) Start Server', description: 'Start the OpenCode server' },
+      { label: '$(refresh) Restart Server', description: 'Restart the OpenCode server' },
+      { label: '$(debug-console) View Server Terminal', description: 'Show the server terminal' },
+      { label: '$(output) View Output Channel', description: 'Show extension logs' }
+    ];
+
+    const selection = await vscode.window.showQuickPick(items, {
+      placeHolder: 'Select an action'
+    });
+
+    if (!selection) {
+      return;
+    }
+
+    if (selection.label.includes('Start Server')) {
+      await vscode.commands.executeCommand(Commands.opencodeStartServer);
+    } else if (selection.label.includes('Restart Server')) {
+      await serverLifecycle.autoStartServer();
+    } else if (selection.label.includes('View Server Terminal')) {
+      const terminal = vscode.window.terminals.find(t => t.name === 'OpenCode Server');
+      terminal?.show(true);
+    } else if (selection.label.includes('View Output Channel')) {
+      ErrorHandler.showOutputChannel();
+    }
+  });
+
+  // Open chat panel command
+  const openChatCommand = vscode.commands.registerCommand(Commands.openChat, async () => {
+    if (!runtime.chatProvider) {
+      vscode.window.showErrorMessage('Chat provider is not available');
+      return;
+    }
+    await runtime.chatProvider.showChatPanel();
+  });
+
+  // Chat message sent command - handles streaming responses from ACP
+  const chatMessageSentCommand = vscode.commands.registerCommand(Commands.chatMessageSent, async (userMessage: ChatMessage) => {
+    if (!runtime.chatProvider) {
+      return;
+    }
+
+    const acpClient = AcpClient.getInstance();
+    const chatProvider = runtime.chatProvider;
+
+    try {
+      // Ensure connection to ACP server
+      if (!acpClient.isClientConnected()) {
+        const connected = await acpClient.connect();
+        if (!connected) {
+          // Check if offline mode is enabled
+          const config = vscode.workspace.getConfiguration('openspec');
+          const offlineModeEnabled = config.get('offlineMode.enabled', true);
+          
+          if (offlineModeEnabled) {
+            // Queue the message for later delivery
+            chatProvider.addMessage({
+              id: `system_${Date.now()}`,
+              role: 'system',
+              content: 'Server unavailable. Your message has been queued and will be sent when the connection is restored.',
+              timestamp: Date.now()
+            });
+            
+            // Show offline indicator in UI
+            const offlineState = acpClient.getOfflineState();
+            chatProvider.updateOfflineState({
+              isOffline: true,
+              pendingMessageCount: offlineState.pendingMessageCount,
+              offlineSince: offlineState.offlineSince
+            });
+            
+            ErrorHandler.debug('Message queued due to server unavailability', 'chatMessageSent', {
+              messagePreview: userMessage.content.substring(0, 50),
+              queueSize: offlineState.pendingMessageCount
+            });
+          } else {
+            chatProvider.addMessage({
+              id: `error_${Date.now()}`,
+              role: 'system',
+              content: 'Failed to connect to OpenCode server. Please start the server first.',
+              timestamp: Date.now()
+            });
+          }
+          return;
+        } else {
+          // Connection restored - update offline state
+          const offlineState = acpClient.getOfflineState();
+          chatProvider.updateOfflineState({
+            isOffline: offlineState.isOffline,
+            pendingMessageCount: offlineState.pendingMessageCount,
+            lastConnectedAt: Date.now()
+          });
+        }
+      }
+      
+      // Set up offline state listener for real-time updates
+      const offlineDisposable = acpClient.onOfflineChange((state) => {
+        chatProvider.updateOfflineState({
+          isOffline: state.isOffline,
+          pendingMessageCount: state.pendingMessageCount,
+          offlineSince: state.offlineSince,
+          lastConnectedAt: state.lastConnectedAt
+        });
+      });
+      
+      // Add to disposables for cleanup
+      context.subscriptions.push(offlineDisposable);
+
+      // Clear previous tool calls for new conversation
+      chatProvider.clearToolCalls();
+
+      // Create placeholder message for AI response
+      const assistantMessageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      chatProvider.addMessage({
+        id: assistantMessageId,
+        role: 'assistant',
+        content: '',
+        timestamp: Date.now(),
+        metadata: { isStreaming: true }
+      });
+
+      // Show typing indicator
+      chatProvider.postMessage({
+        type: 'showTypingIndicator'
+      });
+
+      // Set up message listener for streaming updates
+      let accumulatedContent = '';
+      const messageDisposable = acpClient.onMessage((message) => {
+        switch (message.type) {
+          case 'text_delta':
+            accumulatedContent += message.delta;
+            chatProvider.updateMessage(assistantMessageId, accumulatedContent, true);
+            break;
+          case 'streaming_end':
+            chatProvider.updateMessage(assistantMessageId, accumulatedContent, false);
+            chatProvider.postMessage({
+              type: 'hideTypingIndicator'
+            });
+            messageDisposable.dispose();
+            toolCallDisposable.dispose();
+            break;
+          case 'error':
+            chatProvider.updateMessage(assistantMessageId, `Error: ${message.message}`, false);
+            chatProvider.postMessage({
+              type: 'hideTypingIndicator'
+            });
+            messageDisposable.dispose();
+            toolCallDisposable.dispose();
+            break;
+        }
+      });
+
+      // Set up tool call listener to display tool execution status
+      const toolCallDisposable = acpClient.onToolCall((toolCall) => {
+        chatProvider.addToolCall({
+          id: toolCall.id,
+          name: toolCall.tool,
+          parameters: toolCall.params,
+          status: toolCall.status,
+          timestamp: toolCall.startTime
+        });
+
+        // Update status if tool call is completed or has an error
+        if (toolCall.status === 'completed' || toolCall.status === 'error') {
+          chatProvider.updateToolCallStatus(
+            toolCall.id,
+            toolCall.status,
+            toolCall.result || toolCall.error
+          );
+        }
+      });
+
+      // Set up question tool listener to handle AI questions
+      const questionToolDisposable = acpClient.onQuestionTool((question) => {
+        chatProvider.displayQuestion({
+          id: question.id,
+          question: question.question,
+          options: question.options,
+          allowMultiple: question.allowMultiple,
+          allowCustom: question.allowCustom
+        });
+      });
+
+      // Set up session created listener to capture session ID
+      const sessionCreatedDisposable = acpClient.onSessionCreated((sessionId, changeId) => {
+        if (changeId) {
+          const sessionManager = SessionManager.getInstance();
+          sessionManager.setChangeId(changeId);
+          sessionManager.setAcpSessionId(sessionId);
+          chatProvider.addMessage({
+            id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            role: 'system',
+            content: `Change created: ${changeId}`,
+            timestamp: Date.now(),
+            metadata: { changeId }
+          });
+        }
+      });
+
+      context.subscriptions.push(questionToolDisposable, sessionCreatedDisposable);
+
+      // Send message to ACP server
+      await acpClient.sendMessage(userMessage.content);
+
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      ErrorHandler.handle(err, 'sending chat message', false);
+      chatProvider.addMessage({
+        id: `error_${Date.now()}`,
+        role: 'system',
+        content: `Error: ${err.message}`,
+        timestamp: Date.now()
+      });
+      chatProvider.postMessage({
+        type: 'hideTypingIndicator'
+      });
+    }
+  });
+
+  // Cancel streaming command
+  const chatCancelStreamingCommand = vscode.commands.registerCommand(Commands.chatCancelStreaming, async () => {
+    const acpClient = AcpClient.getInstance();
+    const cancelledResponse = acpClient.cancelStreaming();
+
+    if (runtime.chatProvider && cancelledResponse) {
+      runtime.chatProvider.postMessage({
+        type: 'streamingCancelled',
+        messageId: cancelledResponse.messageId,
+        partialContent: cancelledResponse.content
+      });
+    }
+
+    ErrorHandler.debug('Streaming cancelled by user');
+  });
+
+  // Chat: New Change command - triggered from chat interface
+  const chatNewChangeCommand = vscode.commands.registerCommand(Commands.chatNewChange, async () => {
+    try {
+      const sessionManager = SessionManager.getInstance();
+      await sessionManager.setPhase('new');
+      await sessionManager.addMessage({
+        role: 'system',
+        content: 'Starting New Change flow from chat',
+        metadata: { phase: 'new' }
+      });
+
+      if (runtime.chatProvider) {
+        runtime.chatProvider.addMessage({
+          id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          role: 'system',
+          content: 'Creating a new OpenSpec change. Starting ACP plan mode...',
+          timestamp: Date.now()
+        });
+        runtime.chatProvider.updatePhaseTracker([
+          { id: 'new', name: 'New Change', status: 'active' },
+          { id: 'drafting', name: 'Drafting', status: 'pending' },
+          { id: 'implementation', name: 'Implementation', status: 'pending' }
+        ]);
+        runtime.chatProvider.setCurrentPhase('new');
+      }
+
+      // Start ACP plan mode for interactive change creation
+      const acpClient = AcpClient.getInstance();
+      
+      // Set up question tool listener
+      const questionDisposable = acpClient.onQuestionTool((question) => {
+        if (runtime.chatProvider) {
+          runtime.chatProvider.displayQuestion({
+            id: question.id,
+            question: question.question,
+            options: question.options,
+            allowMultiple: question.allowMultiple,
+            allowCustom: question.allowCustom
+          });
+        }
+      });
+
+      // Set up session created listener
+      const sessionDisposable = acpClient.onSessionCreated((sessionId, changeId) => {
+        if (changeId && runtime.chatProvider) {
+          sessionManager.setChangeId(changeId);
+          sessionManager.setAcpSessionId(sessionId);
+          runtime.chatProvider.addMessage({
+            id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            role: 'system',
+            content: `Change created: ${changeId}`,
+            timestamp: Date.now(),
+            metadata: { changeId }
+          });
+        }
+      });
+
+      context.subscriptions.push(questionDisposable, sessionDisposable);
+
+      // Start plan mode
+      const planModeStarted = await acpClient.startPlanMode();
+      
+      if (!planModeStarted) {
+        throw new Error('Failed to start ACP plan mode');
+      }
+
+      if (runtime.chatProvider) {
+        runtime.chatProvider.addMessage({
+          id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          role: 'assistant',
+          content: 'Hello! I\'m ready to help you create a new OpenSpec change. Please describe what you\'d like to work on.',
+          timestamp: Date.now()
+        });
+      }
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      ErrorHandler.handle(err, 'starting new change from chat', true);
+      if (runtime.chatProvider) {
+        runtime.chatProvider.addMessage({
+          id: `error_${Date.now()}`,
+          role: 'system',
+          content: `Failed to start new change flow: ${err.message}`,
+          timestamp: Date.now()
+        });
+      }
+    }
+  });
+
+  // Chat: Fast Forward command - triggered from chat interface
+  const chatFastForwardCommand = vscode.commands.registerCommand(Commands.chatFastForward, async (changeId?: string) => {
+    try {
+      if (!changeId) {
+        const sessionManager = SessionManager.getInstance();
+        const session = await sessionManager.getCurrentSession();
+        changeId = session?.changeId;
+
+        if (!changeId) {
+          if (runtime.chatProvider) {
+            runtime.chatProvider.addMessage({
+              id: `error_${Date.now()}`,
+              role: 'system',
+              content: 'No change selected. Please select a change first or use the command from the OpenSpec explorer.',
+              timestamp: Date.now()
+            });
+          }
+          return;
+        }
+      }
+
+      const sessionManager = SessionManager.getInstance();
+      await sessionManager.setChangeId(changeId);
+      await sessionManager.setPhase('drafting');
+      await sessionManager.addMessage({
+        role: 'system',
+        content: `Starting Fast Forward phase for change: ${changeId}`,
+        metadata: { changeId, phase: 'drafting' }
+      });
+
+      if (runtime.chatProvider) {
+        runtime.chatProvider.addMessage({
+          id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          role: 'system',
+          content: `Fast-forwarding change "${changeId}". Opening terminal to generate artifacts...`,
+          timestamp: Date.now()
+        });
+        runtime.chatProvider.updatePhaseTracker([
+          { id: 'new', name: 'New Change', status: 'completed' },
+          { id: 'drafting', name: 'Drafting', status: 'active' },
+          { id: 'implementation', name: 'Implementation', status: 'pending' }
+        ]);
+        runtime.chatProvider.setCurrentPhase('drafting');
+      }
+
+      const ready = await ensureLocalOpenCodeServerReady();
+      if (!ready) {
+        if (runtime.chatProvider) {
+          runtime.chatProvider.addMessage({
+            id: `error_${Date.now()}`,
+            role: 'system',
+            content: 'OpenCode server is not responding on port 4099. Please start the server first.',
+            timestamp: Date.now()
+          });
+        }
+        return;
+      }
+
+      const terminalName = `OpenSpec FF: ${changeId}`;
+      const terminal = vscode.window.createTerminal({ name: terminalName });
+      terminal.show(true);
+
+      // Retrieve the ACP session ID for persistence
+      const acpSessionId = await sessionManager.getAcpSessionId();
+
+      const prompt = `use openspec ff skill to populate ${changeId}`;
+      const sessionIdArg = acpSessionId ? ` --session-id ${acpSessionId}` : '';
+      terminal.sendText(`opencode run --attach localhost:4099${sessionIdArg} --continue ${JSON.stringify(prompt)}`, true);
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      ErrorHandler.handle(err, 'starting fast forward from chat', true);
+      if (runtime.chatProvider) {
+        runtime.chatProvider.addMessage({
+          id: `error_${Date.now()}`,
+          role: 'system',
+          content: `Failed to start fast-forward flow: ${err.message}`,
+          timestamp: Date.now()
+        });
+      }
+    }
+  });
+
+  // Chat: Apply command - triggered from chat interface
+  const chatApplyCommand = vscode.commands.registerCommand(Commands.chatApply, async (changeId?: string, count?: number, extraPrompt?: string) => {
+    try {
+      if (!changeId) {
+        const sessionManager = SessionManager.getInstance();
+        const session = await sessionManager.getCurrentSession();
+        changeId = session?.changeId;
+
+        if (!changeId) {
+          if (runtime.chatProvider) {
+            runtime.chatProvider.addMessage({
+              id: `error_${Date.now()}`,
+              role: 'system',
+              content: 'No change selected. Please select a change first or use the command from the OpenSpec explorer.',
+              timestamp: Date.now()
+            });
+          }
+          return;
+        }
+      }
+
+      const sessionManager = SessionManager.getInstance();
+      await sessionManager.setChangeId(changeId);
+      await sessionManager.setPhase('implementation');
+      await sessionManager.addMessage({
+        role: 'system',
+        content: `Starting Apply phase for change: ${changeId}`,
+        metadata: { changeId, phase: 'implementation' }
+      });
+
+      // Prompt for extra context if not already provided
+      let userExtraPrompt = extraPrompt;
+      if (userExtraPrompt === undefined) {
+        userExtraPrompt = await vscode.window.showInputBox({
+          title: 'Additional Context for Apply (Optional)',
+          prompt: 'Add any extra context, requirements, or constraints for this apply phase (optional)',
+          placeHolder: 'e.g., "Focus on error handling", "Use existing patterns", "Check for lint errors"...',
+          ignoreFocusOut: true
+        });
+        // User cancelled - still proceed but without extra context
+      }
+
+      if (runtime.chatProvider) {
+        let systemMessage = `Applying change "${changeId}". Opening terminal to run tasks...`;
+        if (userExtraPrompt && userExtraPrompt.trim()) {
+          systemMessage += `\n\nAdditional context: ${userExtraPrompt.trim()}`;
+        }
+        runtime.chatProvider.addMessage({
+          id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          role: 'system',
+          content: systemMessage,
+          timestamp: Date.now()
+        });
+        runtime.chatProvider.updatePhaseTracker([
+          { id: 'new', name: 'New Change', status: 'completed' },
+          { id: 'drafting', name: 'Drafting', status: 'completed' },
+          { id: 'implementation', name: 'Implementation', status: 'active' }
+        ]);
+        runtime.chatProvider.setCurrentPhase('implementation');
+      }
+
+      const tasksPerRun = count || 1;
+
+      const ready = await ensureLocalOpenCodeServerReady();
+      if (!ready) {
+        if (runtime.chatProvider) {
+          runtime.chatProvider.addMessage({
+            id: `error_${Date.now()}`,
+            role: 'system',
+            content: 'OpenCode server is not responding on port 4099. Please start the server first.',
+            timestamp: Date.now()
+          });
+        }
+        return;
+      }
+
+      // Retrieve the ACP session ID for attachment
+      const acpSessionId = await sessionManager.getAcpSessionId();
+
+      // Store extra prompt in session for potential reuse
+      if (userExtraPrompt && userExtraPrompt.trim()) {
+        await sessionManager.setExtraPrompt(userExtraPrompt.trim());
+      }
+
+      // Execute ralph script with output capture and display in chat
+      const ralphService = RalphService.getInstance();
+
+      // Clear previous script output
+      if (runtime.chatProvider) {
+        runtime.chatProvider.clearScriptOutput();
+        runtime.chatProvider.updateScriptExecutionStatus('running', 'Starting ralph execution...');
+      }
+
+      // Set up output handler for real-time display
+      const outputDisposable = ralphService.onOutput((line) => {
+        if (runtime.chatProvider) {
+          runtime.chatProvider.addScriptOutput(line);
+        }
+      });
+
+      // Set up progress handler for task progress indication
+      const progressDisposable = ralphService.onProgress((progress) => {
+        if (runtime.chatProvider) {
+          const progressMessage = `Progress: ${progress.current}/${progress.total} - ${progress.message}`;
+          runtime.chatProvider.updateScriptExecutionStatus('running', progressMessage);
+        }
+      });
+
+      // Add disposables to context
+      context.subscriptions.push(outputDisposable, progressDisposable);
+
+      // Execute the script with extra prompt support
+      const result = await ralphService.execute({
+        changeId: changeId,
+        count: tasksPerRun,
+        sessionId: acpSessionId,
+        extraPrompt: userExtraPrompt?.trim() || undefined,
+        attachUrl: 'http://localhost:4099'
+      });
+
+      // Update status based on result with enhanced error details
+      if (runtime.chatProvider) {
+        if (result.success) {
+          runtime.chatProvider.updateScriptExecutionStatus('completed', 'Ralph execution completed successfully');
+        } else {
+          // Provide detailed error information
+          const errorDetails = result.error || `Exit code: ${result.exitCode}`;
+          const errorMessage = result.exitCode === null
+            ? `Ralph execution failed: Process could not be started (${errorDetails})`
+            : `Ralph execution failed with exit code ${result.exitCode}`;
+          runtime.chatProvider.updateScriptExecutionStatus('error', errorMessage);
+
+          // Show error output summary if available
+          const errorLines = result.output.filter(line => line.type === 'stderr' || line.type === 'error');
+          if (errorLines.length > 0) {
+            const errorSummary = errorLines.slice(-3).map(line => line.content).join('\n');
+            runtime.chatProvider.addMessage({
+              id: `msg_${Date.now()}_error_summary`,
+              role: 'system',
+              content: `**Error Summary:**\n\`\`\`\n${errorSummary}\n\`\`\``,
+              timestamp: Date.now()
+            });
+          }
+        }
+      }
+
+      // Clean up output and progress handlers
+      outputDisposable.dispose();
+      progressDisposable.dispose();
+
+      // Add summary message with retry option for failures
+      if (runtime.chatProvider) {
+        if (result.success) {
+          const duration = result.duration ? ` (${Math.round(result.duration / 1000)}s)` : '';
+          const tasksCompleted = result.tasksCompleted ? ` - ${result.tasksCompleted} tasks completed` : '';
+          runtime.chatProvider.addMessage({
+            id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            role: 'system',
+            content: `Apply phase completed successfully for "${changeId}"${duration}${tasksCompleted}`,
+            timestamp: Date.now()
+          });
+        } else {
+          // Add error message with retry action
+          runtime.chatProvider.addMessage({
+            id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            role: 'system',
+            content: `Apply phase failed for "${changeId}".\n\n**Possible causes:**\n- OpenCode server connection issue\n- Syntax errors in the code\n- Missing dependencies\n- Task verification failed\n\nCheck the script output above for details. You can retry with adjusted context if needed.`,
+            timestamp: Date.now(),
+            metadata: {
+              isError: true,
+              retryAction: 'apply'
+            }
+          });
+        }
+      }
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      ErrorHandler.handle(err, 'applying change from chat', true);
+      if (runtime.chatProvider) {
+        runtime.chatProvider.updateScriptExecutionStatus('error', `Error: ${err.message}`);
+        runtime.chatProvider.addMessage({
+          id: `error_${Date.now()}`,
+          role: 'system',
+          content: `Failed to apply change: ${err.message}`,
+          timestamp: Date.now()
+        });
+      }
+    }
+  });
+
+  // Chat: Archive command - triggered from chat interface
+  const chatArchiveCommand = vscode.commands.registerCommand(Commands.chatArchive, async (changeId?: string) => {
+    try {
+      if (!changeId) {
+        const sessionManager = SessionManager.getInstance();
+        const session = await sessionManager.getCurrentSession();
+        changeId = session?.changeId;
+        
+        if (!changeId) {
+          if (runtime.chatProvider) {
+            runtime.chatProvider.addMessage({
+              id: `error_${Date.now()}`,
+              role: 'system',
+              content: 'No change selected. Please select a change first or use the command from the OpenSpec explorer.',
+              timestamp: Date.now()
+            });
+          }
+          return;
+        }
+      }
+
+      const sessionManager = SessionManager.getInstance();
+      await sessionManager.setChangeId(changeId);
+      await sessionManager.setPhase('completed');
+      await sessionManager.addMessage({
+        role: 'system',
+        content: `Archiving change: ${changeId}`,
+        metadata: { changeId, phase: 'completed' }
+      });
+
+      if (runtime.chatProvider) {
+        runtime.chatProvider.addMessage({
+          id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          role: 'system',
+          content: `Archiving change "${changeId}". Opening terminal to archive...`,
+          timestamp: Date.now()
+        });
+        runtime.chatProvider.updatePhaseTracker([
+          { id: 'new', name: 'New Change', status: 'completed' },
+          { id: 'drafting', name: 'Drafting', status: 'completed' },
+          { id: 'implementation', name: 'Implementation', status: 'completed' }
+        ]);
+        runtime.chatProvider.setCurrentPhase('implementation');
+      }
+
+      // Delegate to existing archive command logic
+      await vscode.commands.executeCommand(Commands.archiveChange, { label: changeId, path: undefined });
+
+      // Clean up sessions associated with this change after archiving
+      await sessionManager.cleanupSessionsForChange(changeId);
+      ErrorHandler.debug(`Cleaned up sessions for archived change via chat: ${changeId}`);
+
+      // Notify user of completion
+      if (runtime.chatProvider) {
+        runtime.chatProvider.addMessage({
+          id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          role: 'system',
+          content: `Change "${changeId}" has been archived and associated sessions have been cleaned up.`,
+          timestamp: Date.now()
+        });
+      }
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      ErrorHandler.handle(err, 'archiving change from chat', true);
+      if (runtime.chatProvider) {
+        runtime.chatProvider.addMessage({
+          id: `error_${Date.now()}`,
+          role: 'system',
+          content: `Failed to archive change: ${err.message}`,
+          timestamp: Date.now()
+        });
+      }
+    }
+  });
+
+  // Debug: export logs command
+  const exportLogsCommand = vscode.commands.registerCommand('openspec.debug.exportLogs', async () => {
+    try {
+      await ErrorHandler.exportLogs();
+    } catch (error) {
+      ErrorHandler.handle(
+        error instanceof Error ? error : new Error(String(error)),
+        'exporting debug logs',
+        true
+      );
+    }
+  });
+
+  // Debug: toggle debug mode command
+  const toggleDebugCommand = vscode.commands.registerCommand('openspec.debug.toggle', async () => {
+    const currentState = ErrorHandler.isDebugEnabled();
+    const newState = !currentState;
+    
+    ErrorHandler.setDebugEnabled(newState);
+    
+    vscode.window.showInformationMessage(
+      `Debug mode ${newState ? 'enabled' : 'disabled'}`
+    );
+    
+    ErrorHandler.info(`Debug mode ${newState ? 'enabled' : 'disabled'} by user`, false, 'debug');
+  });
+
+  // Debug: show output command
+  const showDebugOutputCommand = vscode.commands.registerCommand('openspec.debug.showOutput', () => {
+    ErrorHandler.showOutputChannel();
+  });
+
   context.subscriptions.push(
     viewDetailsCommand,
     listChangesCommand,
@@ -508,6 +1383,17 @@ export function registerCommands(context: vscode.ExtensionContext, runtime: Exte
     runRunnerAttachedCommand,
     generateProposalCommand,
     initCommand,
-    showOutputCommand
+    showOutputCommand,
+    showServerStatusCommand,
+    openChatCommand,
+    chatMessageSentCommand,
+    chatCancelStreamingCommand,
+    chatNewChangeCommand,
+    chatFastForwardCommand,
+    chatApplyCommand,
+    chatArchiveCommand,
+    exportLogsCommand,
+    toggleDebugCommand,
+    showDebugOutputCommand
   );
 }

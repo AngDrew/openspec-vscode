@@ -1,0 +1,268 @@
+/* Syntax Highlighting for OpenSpec Chat - VS Code Theme Compatible */
+
+/* Base code block styling */
+.hljs {
+  display: block;
+  overflow-x: auto;
+  padding: 12px;
+  background: var(--vscode-textCodeBlock-background, #1e1e1e);
+  color: var(--vscode-editor-foreground, #d4d4d4);
+  font-family: var(--vscode-editor-font-family, 'Consolas, monospace');
+  font-size: 13px;
+  line-height: 1.5;
+  border-radius: 6px;
+}
+
+/* Language-specific code blocks */
+.hljs.language-typescript,
+.hljs.language-javascript,
+.hljs.language-json {
+  background: var(--vscode-textCodeBlock-background, #1e1e1e);
+}
+
+/* Comments */
+.hljs-comment,
+.hljs-quote {
+  color: var(--vscode-editorLineNumber-foreground, #6e7681);
+  font-style: italic;
+}
+
+/* Keywords */
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-subst {
+  color: var(--vscode-symbolIcon-keywordForeground, #569cd6);
+  font-weight: normal;
+}
+
+/* Built-in types and constants */
+.hljs-built_in,
+.hljs-type {
+  color: var(--vscode-symbolIcon-typeParameterForeground, #4ec9b0);
+}
+
+/* Strings */
+.hljs-string,
+.hljs-regexp,
+.hljs-addition {
+  color: var(--vscode-symbolIcon-stringForeground, #ce9178);
+}
+
+/* Numbers */
+.hljs-number,
+.hljs-literal {
+  color: var(--vscode-symbolIcon-numberForeground, #b5cea8);
+}
+
+/* Functions and methods */
+.hljs-function,
+.hljs-title,
+.hljs-section {
+  color: var(--vscode-symbolIcon-functionForeground, #dcdcaa);
+}
+
+/* Classes and interfaces */
+.hljs-class,
+.hljs-title.class_ {
+  color: var(--vscode-symbolIcon-classForeground, #4ec9b0);
+}
+
+/* Variables and properties */
+.hljs-variable,
+.hljs-template-variable,
+.hljs-attr {
+  color: var(--vscode-symbolIcon-variableForeground, #9cdcfe);
+}
+
+/* Attributes (for HTML/XML) */
+.hljs-attribute {
+  color: var(--vscode-symbolIcon-propertyForeground, #9cdcfe);
+}
+
+/* Operators */
+.hljs-operator,
+.hljs-punctuation {
+  color: var(--vscode-editor-foreground, #d4d4d4);
+}
+
+/* Tags (for HTML/XML) */
+.hljs-tag,
+.hljs-name {
+  color: var(--vscode-symbolIcon-keywordForeground, #569cd6);
+}
+
+/* Meta information */
+.hljs-meta,
+.hljs-meta-keyword,
+.hljs-meta-string {
+  color: var(--vscode-symbolIcon-namespaceForeground, #4ec9b0);
+}
+
+/* Deletion and emphasis */
+.hljs-deletion {
+  color: var(--vscode-editorError-foreground, #f44747);
+  background: var(--vscode-diffEditor-removedTextBackground, rgba(255, 0, 0, 0.2));
+}
+
+/* Emphasis */
+.hljs-emphasis {
+  font-style: italic;
+}
+
+/* Strong */
+.hljs-strong {
+  font-weight: bold;
+}
+
+/* Links */
+.hljs-link {
+  color: var(--vscode-textLink-foreground, #3794ff);
+  text-decoration: underline;
+}
+
+/* JSON specific */
+.hljs.language-json .hljs-attr {
+  color: var(--vscode-symbolIcon-propertyForeground, #9cdcfe);
+}
+
+.hljs.language-json .hljs-string {
+  color: var(--vscode-symbolIcon-stringForeground, #ce9178);
+}
+
+.hljs.language-json .hljs-number {
+  color: var(--vscode-symbolIcon-numberForeground, #b5cea8);
+}
+
+.hljs.language-json .hljs-literal {
+  color: var(--vscode-symbolIcon-keywordForeground, #569cd6);
+}
+
+/* TypeScript/JavaScript specific */
+.hljs.language-typescript .hljs-keyword,
+.hljs.language-javascript .hljs-keyword {
+  color: var(--vscode-symbolIcon-keywordForeground, #569cd6);
+}
+
+.hljs.language-typescript .hljs-function,
+.hljs.language-javascript .hljs-function {
+  color: var(--vscode-symbolIcon-functionForeground, #dcdcaa);
+}
+
+.hljs.language-typescript .hljs-class,
+.hljs.language-javascript .hljs-class {
+  color: var(--vscode-symbolIcon-classForeground, #4ec9b0);
+}
+
+.hljs.language-typescript .hljs-interface,
+.hljs.language-javascript .hljs-interface {
+  color: var(--vscode-symbolIcon-interfaceForeground, #4ec9b0);
+}
+
+.hljs.language-typescript .hljs-type,
+.hljs.language-javascript .hljs-type {
+  color: var(--vscode-symbolIcon-typeParameterForeground, #4ec9b0);
+}
+
+.hljs.language-typescript .hljs-variable,
+.hljs.language-javascript .hljs-variable {
+  color: var(--vscode-symbolIcon-variableForeground, #9cdcfe);
+}
+
+.hljs.language-typescript .hljs-string,
+.hljs.language-javascript .hljs-string {
+  color: var(--vscode-symbolIcon-stringForeground, #ce9178);
+}
+
+.hljs.language-typescript .hljs-number,
+.hljs.language-javascript .hljs-number {
+  color: var(--vscode-symbolIcon-numberForeground, #b5cea8);
+}
+
+.hljs.language-typescript .hljs-comment,
+.hljs.language-javascript .hljs-comment {
+  color: var(--vscode-editorLineNumber-foreground, #6a9955);
+}
+
+.hljs.language-typescript .hljs-regexp,
+.hljs.language-javascript .hljs-regexp {
+  color: var(--vscode-symbolIcon-stringForeground, #d16969);
+}
+
+/* Code block header with language label */
+.code-block-wrapper {
+  position: relative;
+  margin: 8px 0;
+}
+
+.code-block-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 12px;
+  background: var(--vscode-editorGroupHeader-tabsBackground, #2d2d30);
+  border: 1px solid var(--vscode-panel-border, #3c3c3c);
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground, #cccccc);
+}
+
+.code-block-language {
+  font-family: var(--vscode-editor-font-family, 'Consolas, monospace');
+  text-transform: uppercase;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.code-block-copy {
+  padding: 2px 8px;
+  background: transparent;
+  border: 1px solid var(--vscode-panel-border, #3c3c3c);
+  border-radius: 3px;
+  color: var(--vscode-descriptionForeground, #cccccc);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.code-block-copy:hover {
+  background: var(--vscode-toolbar-hoverBackground, #3c3c3c);
+  color: var(--vscode-foreground, #ffffff);
+}
+
+.code-block-wrapper pre {
+  margin: 0;
+  border-radius: 0 0 6px 6px;
+  border: 1px solid var(--vscode-panel-border, #3c3c3c);
+  border-top: none;
+}
+
+/* Inline code styling (not highlighted) */
+.inline-code {
+  padding: 2px 6px;
+  background: var(--vscode-textCodeBlock-background, #1e1e1e);
+  color: var(--vscode-textPreformat-foreground, #d4d4d4);
+  border-radius: 4px;
+  font-family: var(--vscode-editor-font-family, 'Consolas, monospace');
+  font-size: 0.9em;
+}
+
+/* Fallback for unknown languages */
+.hljs.language-text,
+.hljs.language-plaintext {
+  color: var(--vscode-editor-foreground, #d4d4d4);
+}
+
+/* Selection styling */
+.hljs::selection,
+.hljs span::selection {
+  background: var(--vscode-editor-selectionBackground, #264f78);
+  color: var(--vscode-editor-selectionForeground, #ffffff);
+}
+
+/* Focus styling */
+.hljs:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--vscode-focusBorder, #007fd4);
+}

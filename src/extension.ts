@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 
 import { OpenSpecExplorerProvider } from './providers/explorerProvider';
 import { OpenSpecWebviewProvider } from './providers/webviewProvider';
+import { ChatProvider } from './providers/chatProvider';
 import { ErrorHandler } from './utils/errorHandler';
 import { CacheManager } from './utils/cache';
 
@@ -13,13 +14,13 @@ import { ExtensionRuntimeState } from './extension/runtime';
 
 let runtime: ExtensionRuntimeState | undefined;
 
-export function activate(context: vscode.ExtensionContext) {
+export async function activate(context: vscode.ExtensionContext) {
   console.log('OpenSpec extension is now active!');
 
   // Initialize error handling and cache
   ErrorHandler.initialize();
 
-  runtime = activateExtension(context);
+  runtime = await activateExtension(context);
   runtime.cacheManager = CacheManager.getInstance();
 
   // Register the tree data provider
@@ -34,6 +35,10 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.window.registerWebviewPanelSerializer('openspec.details', runtime.webviewProvider)
   );
+
+  // Register the chat provider
+  runtime.chatProvider = new ChatProvider(context.extensionUri);
+  context.subscriptions.push(runtime.chatProvider);
 
   // Register commands
   registerCommands(context, runtime);
