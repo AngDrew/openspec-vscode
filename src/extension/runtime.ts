@@ -2,14 +2,14 @@ import * as vscode from 'vscode';
 
 import { OpenSpecExplorerProvider } from '../providers/explorerProvider';
 import { OpenSpecWebviewProvider } from '../providers/webviewProvider';
-import { ChatProvider } from '../providers/chatProvider';
+import { ChatViewProvider } from '../providers/chatViewProvider';
 import { ServerStatusIndicator } from './serverStatusIndicator';
 import { CacheManager } from '../utils/cache';
 
 export interface ExtensionRuntimeState {
   explorerProvider?: OpenSpecExplorerProvider;
   webviewProvider?: OpenSpecWebviewProvider;
-  chatProvider?: ChatProvider;
+  chatProvider?: ChatViewProvider;
   fileWatcher?: vscode.FileSystemWatcher;
   cacheManager?: CacheManager;
   openCodeServerTerminal?: vscode.Terminal;

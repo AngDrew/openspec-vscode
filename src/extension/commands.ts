@@ -9,7 +9,8 @@ import { ServerLifecycle } from '../services/serverLifecycle';
 import { SessionManager } from '../services/sessionManager';
 import { AcpClient } from '../services/acpClient';
 import { RalphService } from '../services/ralphService';
-import { ChatMessage } from '../providers/chatProvider';
+import { PortManager } from '../services/portManager';
+import { ChatMessage } from '../providers/chatViewProvider';
 
 async function sleep(ms: number): Promise<void> {
   await new Promise(resolve => setTimeout(resolve, ms));
@@ -17,7 +18,15 @@ async function sleep(ms: number): Promise<void> {
 
 async function ensureLocalOpenCodeServerReady(timeoutMs: number = 15000): Promise<boolean> {
   try {
-    const alreadyListening = await WorkspaceUtils.isOpenCodeServerListening();
+    const portManager = PortManager.getInstance();
+    const port = portManager.getSelectedPort();
+    
+    if (!port) {
+      // No port configured yet
+      return false;
+    }
+
+    const alreadyListening = await WorkspaceUtils.isPortOpen('127.0.0.1', port, 500);
     if (alreadyListening) {
       return true;
     }
@@ -27,7 +36,7 @@ async function ensureLocalOpenCodeServerReady(timeoutMs: number = 15000): Promis
 
     const startedAt = Date.now();
     while (Date.now() - startedAt < timeoutMs) {
-      if (await WorkspaceUtils.isOpenCodeServerListening(500)) {
+      if (await WorkspaceUtils.isPortOpen('127.0.0.1', port, 500)) {
         return true;
       }
       await sleep(500);
@@ -372,12 +381,20 @@ export function registerCommands(context: vscode.ExtensionContext, runtime: Exte
   // Start OpenCode server command
   const startOpenCodeServerCommand = vscode.commands.registerCommand(Commands.opencodeStartServer, async () => {
     try {
-      const alreadyListening = await WorkspaceUtils.isOpenCodeServerListening();
+      const portManager = PortManager.getInstance();
+      const port = portManager.getSelectedPort();
+      
+      if (!port) {
+        vscode.window.showErrorMessage('No port configured. Please open the chat view first.');
+        return;
+      }
+
+      const alreadyListening = await WorkspaceUtils.isPortOpen('127.0.0.1', port, 500);
       if (alreadyListening) {
         // If we have (or can find) the terminal, reveal it for convenience.
-        const existing = vscode.window.terminals.find(t => t.name === 'OpenCode Server');
+        const existing = vscode.window.terminals.find(t => t.name === 'OpenCode ACP Server');
         existing?.show(true);
-        vscode.window.showInformationMessage('OpenCode server already running on port 4099');
+        vscode.window.showInformationMessage(`OpenCode server already running on port ${port}`);
         return;
       }
 
@@ -387,13 +404,18 @@ export function registerCommands(context: vscode.ExtensionContext, runtime: Exte
       }
 
       if (!runtime.openCodeServerTerminal) {
-        runtime.openCodeServerTerminal = vscode.window.terminals.find(t => t.name === 'OpenCode Server')
-          ?? vscode.window.createTerminal({ name: 'OpenCode Server' });
+        runtime.openCodeServerTerminal = vscode.window.terminals.find(t => t.name === 'OpenCode ACP Server')
+          ?? vscode.window.createTerminal({ name: 'OpenCode ACP Server' });
+      }
+
+      const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+      if (workspaceFolder) {
+        runtime.openCodeServerTerminal.sendText(`cd "${workspaceFolder.uri.fsPath}"`, true);
       }
 
       runtime.openCodeServerTerminal.show(true);
-      // `--print-logs` makes failures visible in the terminal.
-      runtime.openCodeServerTerminal.sendText('opencode serve --port 4099 --print-logs', true);
+      // Start ACP server which also starts HTTP server on same port
+      runtime.openCodeServerTerminal.sendText(`opencode acp --port ${port} --hostname 127.0.0.1 --print-logs`, true);
     } catch (error) {
       vscode.window.showErrorMessage(
         `Failed to start OpenCode server: ${error instanceof Error ? error.message : 'Unknown error'}`

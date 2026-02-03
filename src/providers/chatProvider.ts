@@ -878,32 +878,23 @@ export class ChatProvider {
   private async _handleAnswerQuestion(questionId: string, answers: string[]): Promise<void> {
     try {
       const acpClient = (await import('../services/acpClient')).AcpClient.getInstance();
-      const success = await acpClient.answerQuestion(questionId, answers);
+      await acpClient.answerQuestion(questionId, answers);
       
-      if (success) {
-        // Add user answer to chat
-        const answerText = answers.join(', ');
-        this.addMessage({
-          id: this._generateMessageId(),
-          role: 'user',
-          content: `Answer: ${answerText}`,
-          timestamp: Date.now(),
-          metadata: { questionId }
-        });
-        
-        // Hide the question UI
-        this.postMessage({
-          type: 'questionAnswered',
-          questionId
-        });
-      } else {
-        this.addMessage({
-          id: this._generateMessageId(),
-          role: 'system',
-          content: 'Failed to submit answer. Please try again.',
-          timestamp: Date.now()
-        });
-      }
+      // Add user answer to chat
+      const answerText = answers.join(', ');
+      this.addMessage({
+        id: this._generateMessageId(),
+        role: 'user',
+        content: `Answer: ${answerText}`,
+        timestamp: Date.now(),
+        metadata: { questionId }
+      });
+      
+      // Hide the question UI
+      this.postMessage({
+        type: 'questionAnswered',
+        questionId
+      });
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       ErrorHandler.handle(err, 'answering question', false);

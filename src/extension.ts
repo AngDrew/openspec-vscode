@@ -2,9 +2,10 @@ import * as vscode from 'vscode';
 
 import { OpenSpecExplorerProvider } from './providers/explorerProvider';
 import { OpenSpecWebviewProvider } from './providers/webviewProvider';
-import { ChatProvider } from './providers/chatProvider';
+import { ChatViewProvider } from './providers/chatViewProvider';
 import { ErrorHandler } from './utils/errorHandler';
 import { CacheManager } from './utils/cache';
+import { PortManager } from './services/portManager';
 
 import { activateExtension } from './extension/activate';
 import { deactivateExtension } from './extension/deactivate';
@@ -19,6 +20,9 @@ export async function activate(context: vscode.ExtensionContext) {
 
   // Initialize error handling and cache
   ErrorHandler.initialize();
+
+  // Initialize PortManager with context
+  PortManager.getInstance().initialize(context);
 
   runtime = await activateExtension(context);
   runtime.cacheManager = CacheManager.getInstance();
@@ -36,9 +40,29 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.window.registerWebviewPanelSerializer('openspec.details', runtime.webviewProvider)
   );
 
-  // Register the chat provider
-  runtime.chatProvider = new ChatProvider(context.extensionUri);
-  context.subscriptions.push(runtime.chatProvider);
+  // Register the chat view provider (sidebar view)
+  const chatViewProvider = new ChatViewProvider(context.extensionUri);
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(ChatViewProvider.viewType, chatViewProvider)
+  );
+  runtime.chatProvider = chatViewProvider as unknown as typeof runtime.chatProvider;
+
+  // Set context keys for chat
+  const config = vscode.workspace.getConfiguration('openspec');
+  vscode.commands.executeCommand('setContext', 'openspec:chatEnabled', config.get('chat.enabled', true));
+  vscode.commands.executeCommand('setContext', 'openspec:chatFocus', false);
+  vscode.commands.executeCommand('setContext', 'openspec:inputEmpty', true);
+  vscode.commands.executeCommand('setContext', 'openspec:streaming', false);
+
+  // Listen for configuration changes
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration(e => {
+      if (e.affectsConfiguration('openspec.chat.enabled')) {
+        const config = vscode.workspace.getConfiguration('openspec');
+        vscode.commands.executeCommand('setContext', 'openspec:chatEnabled', config.get('chat.enabled', true));
+      }
+    })
+  );
 
   // Register commands
   registerCommands(context, runtime);

@@ -1,8 +1,9 @@
 import * as vscode from 'vscode';
-import * as http from 'http';
+import { spawn, ChildProcess } from 'child_process';
 import { ErrorHandler } from '../utils/errorHandler';
 import { PortManager } from './portManager';
 
+// ACP JSON-RPC types
 export interface JsonRpcRequest {
   jsonrpc: '2.0';
   id: string | number;
@@ -46,6 +47,14 @@ export interface ParsedResponse {
   timestamp: number;
 }
 
+export interface QuestionToolRequest {
+  id: string;
+  question: string;
+  options?: string[];
+  allowMultiple?: boolean;
+  allowCustom?: boolean;
+}
+
 export type AcpMessage =
   | { type: 'text'; content: string; messageId?: string }
   | { type: 'text_delta'; delta: string; messageId: string }
@@ -66,33 +75,6 @@ export interface AcpConnectionConfig {
   timeoutMs: number;
   retryAttempts: number;
   retryDelayMs: number;
-}
-
-export interface PlanModeConfig {
-  enabled: boolean;
-  initialPrompt: string;
-  skillName: string;
-}
-
-export interface QuestionToolRequest {
-  id: string;
-  question: string;
-  options?: string[];
-  allowMultiple?: boolean;
-  allowCustom?: boolean;
-}
-
-export interface QuestionToolResponse {
-  questionId: string;
-  answers: string[];
-}
-
-export interface QueuedMessage {
-  id: string;
-  content: string;
-  timestamp: number;
-  retryCount: number;
-  abortSignal?: AbortSignal;
 }
 
 export interface OfflineState {
@@ -121,33 +103,17 @@ export class AcpClient {
   private messageListeners: Array<(message: AcpMessage) => void> = [];
   private connectionListeners: Array<(connected: boolean) => void> = [];
   private toolCallListeners: Array<(toolCall: ToolCall) => void> = [];
-  private responseListeners: Array<(response: ParsedResponse) => void> = [];
   private questionToolListeners: Array<(question: QuestionToolRequest) => void> = [];
   private sessionCreatedListeners: Array<(sessionId: string, changeId?: string) => void> = [];
   private isConnected = false;
-  private planModeConfig: PlanModeConfig = {
-    enabled: false,
-    initialPrompt: 'use openspec skill to create new change, always use questions tool if need to answer user questions',
-    skillName: 'openspec'
-  };
   private currentSessionId: string | undefined;
-  private pendingQuestions = new Map<string, QuestionToolRequest>();
-  private sseConnection: http.ClientRequest | undefined;
-  private sseReconnectAttempts = 0;
-  private readonly MAX_SSE_RECONNECT_ATTEMPTS = 5;
-  private sseReconnectTimer: NodeJS.Timeout | undefined;
-  private activeStreamMessageId: string | undefined;
-  private activeToolCalls = new Map<string, ToolCall>();
-  private currentResponseBuffer = '';
-  private currentResponse: Partial<ParsedResponse> | undefined;
-  private abortController: AbortController | undefined;
-  
-  // Graceful degradation - offline mode support
-  private messageQueue: QueuedMessage[] = [];
+  private acpProcess: ChildProcess | undefined;
+  private messageQueue: string[] = [];
   private offlineState: OfflineState = { isOffline: false, pendingMessageCount: 0 };
-  private offlineRetryTimer: NodeJS.Timeout | undefined;
   private offlineListeners: Array<(state: OfflineState) => void> = [];
   private lastSuccessfulConnection: number | undefined;
+  private reconnectTimer: NodeJS.Timeout | undefined;
+  private isConnecting = false;
 
   private constructor() {
     this.portManager = PortManager.getInstance();
@@ -176,51 +142,65 @@ export class AcpClient {
     return { ...this.config };
   }
 
+  isClientConnected(): boolean {
+    return this.isConnected && this.acpProcess !== undefined && !this.acpProcess.killed;
+  }
+
   async connect(): Promise<boolean> {
-    const port = this.portManager.getSelectedPort() || this.config.port;
+    if (this.isConnecting) {
+      ErrorHandler.debug('Connection already in progress, waiting...');
+      // Wait for connection to complete
+      let attempts = 0;
+      while (this.isConnecting && attempts < 20) {
+        await this.delay(100);
+        attempts++;
+      }
+      return this.isConnected;
+    }
 
-    for (let attempt = 1; attempt <= this.config.retryAttempts; attempt++) {
-      try {
-        ErrorHandler.debug(`Connecting to ACP server (attempt ${attempt}/${this.config.retryAttempts})...`);
+    if (this.isClientConnected()) {
+      return true;
+    }
 
-        const connected = await this.tryConnect(port);
+    this.isConnecting = true;
 
-        if (connected) {
-          this.isConnected = true;
-          this.config.port = port;
-          this.lastSuccessfulConnection = Date.now();
-          this.updateOfflineState(false);
-          this.notifyConnectionListeners(true);
-          ErrorHandler.debug(`Successfully connected to ACP server on port ${port}`);
-          return true;
-        }
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        ErrorHandler.debug(`Connection attempt ${attempt} failed: ${errorMessage}`);
+    try {
+      const port = this.portManager.getSelectedPort() || this.config.port;
+      
+      for (let attempt = 1; attempt <= this.config.retryAttempts; attempt++) {
+        try {
+          ErrorHandler.debug(`Connecting to ACP server (attempt ${attempt}/${this.config.retryAttempts})...`);
 
-        if (attempt < this.config.retryAttempts) {
-          const delay = this.calculateBackoffDelay(attempt);
-          ErrorHandler.debug(`Retrying in ${delay}ms...`);
-          await this.delay(delay);
+          const connected = await this.tryConnect(port);
+
+          if (connected) {
+            this.isConnected = true;
+            this.config.port = port;
+            this.lastSuccessfulConnection = Date.now();
+            this.updateOfflineState(false);
+            this.notifyConnectionListeners(true);
+            ErrorHandler.debug(`Successfully connected to ACP server on port ${port}`);
+            return true;
+          }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          ErrorHandler.debug(`Connection attempt ${attempt} failed: ${errorMessage}`);
+
+          if (attempt < this.config.retryAttempts) {
+            const delay = this.calculateBackoffDelay(attempt);
+            ErrorHandler.debug(`Retrying in ${delay}ms...`);
+            await this.delay(delay);
+          }
         }
       }
+
+      this.isConnected = false;
+      this.updateOfflineState(true);
+      this.notifyConnectionListeners(false);
+      return false;
+    } finally {
+      this.isConnecting = false;
     }
-
-    this.isConnected = false;
-    this.updateOfflineState(true);
-    this.notifyConnectionListeners(false);
-
-    const shouldStart = await vscode.window.showWarningMessage(
-      `Failed to connect to OpenCode server after ${this.config.retryAttempts} attempts. Would you like to start the server?`,
-      'Start Server',
-      'Cancel'
-    );
-
-    if (shouldStart === 'Start Server') {
-      vscode.commands.executeCommand('openspec.startServer');
-    }
-
-    return false;
   }
 
   private calculateBackoffDelay(attempt: number): number {
@@ -231,605 +211,444 @@ export class AcpClient {
     return Math.min(exponentialDelay + jitter, maxDelay);
   }
 
-  private async tryConnect(port: number): Promise<boolean> {
-    try {
-      const response = await this.httpRequest('GET', '/health', undefined, 5000);
-      if (response.statusCode === 200) {
-        this.setupSseConnection(port);
-        return true;
-      }
-      throw new Error(`Health check failed with status ${response.statusCode}`);
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      throw new Error(`Connection failed: ${errorMessage}`);
-    }
+  private delay(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
-  private setupSseConnection(port: number): void {
-    if (this.sseConnection) {
-      this.sseConnection.destroy();
+  private async tryConnect(port: number): Promise<boolean> {
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+    if (!workspaceFolder) {
+      throw new Error('No workspace folder found');
     }
 
-    if (this.sseReconnectTimer) {
-      clearTimeout(this.sseReconnectTimer);
-      this.sseReconnectTimer = undefined;
-    }
-
-    const options: http.RequestOptions = {
-      hostname: this.config.host,
-      port: port,
-      path: '/events',
-      method: 'GET',
-      headers: {
-        'Accept': 'text/event-stream',
-        'Cache-Control': 'no-cache'
+    // Check if HTTP server is already running on this port
+    try {
+      const isRunning = await this.checkHttpServer(port);
+      if (isRunning) {
+        ErrorHandler.debug(`HTTP server already running on port ${port}`);
+        // Start ACP process which will connect to existing server
+        await this.startAcpProcess(port, workspaceFolder.uri.fsPath);
+        return true;
       }
-    };
+    } catch {
+      // Server not running, we'll start it
+    }
 
-    this.sseConnection = http.request(options, (res) => {
-      ErrorHandler.debug('SSE connection established');
-      this.sseReconnectAttempts = 0;
+    // Start ACP server (which also starts HTTP server)
+    await this.startAcpProcess(port, workspaceFolder.uri.fsPath);
+    
+    // Wait for HTTP server to be ready
+    let attempts = 0;
+    const maxAttempts = 30;
+    while (attempts < maxAttempts) {
+      await this.delay(500);
+      const isReady = await this.checkHttpServer(port);
+      if (isReady) {
+        return true;
+      }
+      attempts++;
+    }
+
+    throw new Error(`ACP server did not start within ${maxAttempts * 500}ms`);
+  }
+
+  private async checkHttpServer(port: number): Promise<boolean> {
+    return new Promise((resolve) => {
+      const http = require('http');
+      const req = http.get(`http://127.0.0.1:${port}/global/health`, {
+        timeout: 1000
+      }, (res: { statusCode?: number }) => {
+        resolve(res.statusCode === 200);
+      });
+      req.on('error', () => resolve(false));
+      req.on('timeout', () => {
+        req.destroy();
+        resolve(false);
+      });
+    });
+  }
+
+  private async startAcpProcess(port: number, cwd: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      // Check if we already have a process running
+      if (this.acpProcess && !this.acpProcess.killed) {
+        ErrorHandler.debug('ACP process already running, reusing');
+        resolve();
+        return;
+      }
+
+      ErrorHandler.debug(`Starting ACP process on port ${port}...`);
+
+      this.acpProcess = spawn('opencode', ['acp', '--port', String(port), '--hostname', '127.0.0.1', '--print-logs'], {
+        cwd,
+        stdio: ['pipe', 'pipe', 'pipe']
+      });
 
       let buffer = '';
 
-      res.on('data', (chunk: Buffer) => {
-        buffer += chunk.toString();
+      this.acpProcess.stdout?.on('data', (data: Buffer) => {
+        buffer += data.toString();
         const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
+        buffer = lines.pop() || ''; // Keep incomplete line in buffer
 
         for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try {
-              const data = JSON.parse(line.slice(6)) as JsonRpcNotification;
-              this.handleNotification(data);
-            } catch (error) {
-              ErrorHandler.debug(`Failed to parse SSE message: ${error}`);
-            }
-          } else if (line.startsWith('event: ')) {
-            // Handle event type if needed
-            const eventType = line.slice(7).trim();
-            ErrorHandler.debug(`SSE event type: ${eventType}`);
-          } else if (line.startsWith('id: ')) {
-            // Handle event ID for resuming
-            const eventId = line.slice(4).trim();
-            ErrorHandler.debug(`SSE event ID: ${eventId}`);
+          if (line.trim()) {
+            this.handleAcpLine(line.trim());
           }
         }
       });
 
-      res.on('end', () => {
-        ErrorHandler.debug('SSE connection ended');
-        this.handleSseDisconnect(port);
+      this.acpProcess.stderr?.on('data', (data: Buffer) => {
+        const message = data.toString().trim();
+        if (message) {
+          ErrorHandler.debug(`ACP stderr: ${message}`);
+        }
       });
 
-      res.on('error', (error: Error) => {
-        ErrorHandler.debug(`SSE connection error: ${error.message}`);
-        this.handleSseDisconnect(port);
+      this.acpProcess.on('error', (error) => {
+        ErrorHandler.handle(error, 'ACP process error', false);
+        this.isConnected = false;
+        this.notifyConnectionListeners(false);
+        reject(error);
       });
-    });
 
-    this.sseConnection.on('error', (error: Error) => {
-      ErrorHandler.debug(`SSE request error: ${error.message}`);
-      this.handleSseDisconnect(port);
-    });
+      this.acpProcess.on('exit', (code) => {
+        ErrorHandler.debug(`ACP process exited with code ${code}`);
+        this.isConnected = false;
+        this.notifyConnectionListeners(false);
+        
+        // Schedule reconnect
+        if (!this.reconnectTimer) {
+          this.reconnectTimer = setTimeout(() => {
+            this.reconnectTimer = undefined;
+            if (!this.isClientConnected()) {
+              ErrorHandler.debug('Attempting to reconnect ACP...');
+              this.connect().catch(() => {});
+            }
+          }, 5000);
+        }
+      });
 
-    this.sseConnection.end();
+      // Give it a moment to start
+      setTimeout(() => {
+        if (this.acpProcess && !this.acpProcess.killed) {
+          resolve();
+        } else {
+          reject(new Error('ACP process failed to start'));
+        }
+      }, 1000);
+    });
   }
 
-  private handleSseDisconnect(port: number): void {
-    if (!this.isConnected) {
-      return;
+  private handleAcpLine(line: string): void {
+    try {
+      const message = JSON.parse(line);
+      
+      // Check if it's a response to a pending request
+      if (message.id !== undefined && this.pendingRequests.has(message.id)) {
+        const request = this.pendingRequests.get(message.id);
+        if (request) {
+          clearTimeout(request.timeout);
+          this.pendingRequests.delete(message.id);
+          
+          if (message.error) {
+            request.reject(new Error(message.error.message || 'Unknown error'));
+          } else {
+            request.resolve(message);
+          }
+        }
+        return;
+      }
+
+      // Handle notifications/messages
+      if (message.method) {
+        this.handleNotification(message);
+      }
+    } catch {
+      // Not valid JSON, might be log output
+      ErrorHandler.debug(`ACP output: ${line}`);
     }
-
-    this.sseReconnectAttempts++;
-
-    if (this.sseReconnectAttempts > this.MAX_SSE_RECONNECT_ATTEMPTS) {
-      ErrorHandler.debug(`SSE reconnection failed after ${this.MAX_SSE_RECONNECT_ATTEMPTS} attempts`);
-      this.isConnected = false;
-      this.notifyConnectionListeners(false);
-      return;
-    }
-
-    const backoffDelay = Math.min(
-      1000 * Math.pow(2, this.sseReconnectAttempts - 1),
-      30000
-    );
-
-    ErrorHandler.debug(`SSE reconnecting in ${backoffDelay}ms (attempt ${this.sseReconnectAttempts}/${this.MAX_SSE_RECONNECT_ATTEMPTS})`);
-
-    this.sseReconnectTimer = setTimeout(() => {
-      this.setupSseConnection(port);
-    }, backoffDelay);
   }
 
   private handleNotification(notification: JsonRpcNotification): void {
     switch (notification.method) {
-      case 'message': {
-        const params = notification.params as { content?: string; type?: string; messageId?: string };
-        if (params.content) {
-          this.currentResponseBuffer += params.content;
-          this.notifyMessageListeners({
-            type: 'text',
-            content: params.content,
-            messageId: params.messageId
-          });
+      case 'sessionUpdate': {
+        const params = notification.params as unknown as { update?: unknown };
+        if (params?.update) {
+          this.handleSessionUpdate(params.update);
         }
         break;
       }
-      case 'message_delta': {
-        const params = notification.params as { delta?: string; messageId?: string };
-        if (params.delta && params.messageId) {
-          this.currentResponseBuffer += params.delta;
-          this.notifyMessageListeners({
-            type: 'text_delta',
-            delta: params.delta,
-            messageId: params.messageId
-          });
-        }
+      case 'message':
+        this.notifyMessageListeners({
+          type: 'text',
+          content: (notification.params as unknown as { content?: string })?.content || '',
+          messageId: (notification.params as unknown as { messageId?: string })?.messageId
+        });
         break;
-      }
-      case 'streaming_start': {
-        const params = notification.params as { messageId?: string };
-        if (params.messageId) {
-          this.activeStreamMessageId = params.messageId;
-          this.notifyMessageListeners({
-            type: 'streaming_start',
-            messageId: params.messageId
-          });
-        }
+      case 'message_delta':
+        this.notifyMessageListeners({
+          type: 'text_delta',
+          delta: (notification.params as unknown as { delta?: string })?.delta || '',
+          messageId: (notification.params as unknown as { messageId?: string })?.messageId || 'unknown'
+        });
         break;
-      }
-      case 'streaming_end': {
-        const params = notification.params as { messageId?: string };
-        if (params.messageId) {
-          this.activeStreamMessageId = undefined;
-          this.notifyMessageListeners({
-            type: 'streaming_end',
-            messageId: params.messageId
-          });
-
-          if (this.currentResponse && this.currentResponse.messageId === params.messageId) {
-            this.currentResponse.isComplete = true;
-            this.currentResponse.content = this.currentResponseBuffer;
-            const response = this.currentResponse as ParsedResponse;
-            this.notifyResponseListeners(response);
-            this.notifyMessageListeners({
-              type: 'response_complete',
-              response
-            });
-          }
-        }
+      case 'streaming_start':
+        this.notifyMessageListeners({
+          type: 'streaming_start',
+          messageId: (notification.params as unknown as { messageId?: string })?.messageId || 'unknown'
+        });
         break;
-      }
+      case 'streaming_end':
+        this.notifyMessageListeners({
+          type: 'streaming_end',
+          messageId: (notification.params as unknown as { messageId?: string })?.messageId || 'unknown'
+        });
+        break;
       case 'tool_call': {
-        const params = notification.params as { tool?: string; params?: unknown; id?: string };
-        if (params.tool && params.id) {
-          const toolCall: ToolCall = {
-            id: params.id,
-            tool: params.tool,
-            params: params.params || {},
-            status: 'running',
-            startTime: Date.now()
-          };
-
-          this.activeToolCalls.set(params.id, toolCall);
-          this.notifyToolCallListeners(toolCall);
-          this.notifyMessageListeners({
-            type: 'tool_call',
-            tool: params.tool,
-            params: params.params || {},
-            id: params.id
-          });
-
-          if (this.currentResponse) {
-            this.currentResponse.toolCalls = this.currentResponse.toolCalls || [];
-            this.currentResponse.toolCalls.push(toolCall);
-          }
-        }
-        break;
-      }
-      case 'tool_result': {
-        const params = notification.params as { tool?: string; result?: unknown; id?: string };
-        if (params.tool && params.id) {
-          const existingToolCall = this.activeToolCalls.get(params.id);
-          if (existingToolCall) {
-            existingToolCall.status = 'completed';
-            existingToolCall.endTime = Date.now();
-            existingToolCall.result = params.result;
-            this.notifyToolCallListeners(existingToolCall);
-          }
-
-          this.notifyMessageListeners({
-            type: 'tool_result',
-            tool: params.tool,
-            result: params.result,
-            id: params.id
-          });
-        }
-        break;
-      }
-      case 'status': {
-        const params = notification.params as { status?: string };
-        if (params.status) {
-          this.notifyMessageListeners({ type: 'status', status: params.status });
-        }
-        break;
-      }
-      case 'question_tool': {
-        const params = notification.params as { 
-          id?: string; 
-          question?: string; 
-          options?: string[];
-          allowMultiple?: boolean;
-          allowCustom?: boolean;
+        const toolParams = notification.params as unknown as { id?: string; tool?: string; params?: unknown };
+        const toolCall: ToolCall = {
+          id: toolParams?.id || `tool_${Date.now()}`,
+          tool: toolParams?.tool || 'unknown',
+          params: toolParams?.params || {},
+          status: 'running',
+          startTime: Date.now()
         };
-        if (params.id && params.question) {
-          const questionRequest: QuestionToolRequest = {
-            id: params.id,
-            question: params.question,
-            options: params.options,
-            allowMultiple: params.allowMultiple,
-            allowCustom: params.allowCustom
-          };
-          
-          // Store in pending questions
-          this.pendingQuestions.set(params.id, questionRequest);
-          
-          // Notify listeners
-          this.notifyQuestionToolListeners(questionRequest);
-          this.notifyMessageListeners({
-            type: 'question_tool',
-            question: questionRequest
-          });
-          
-          ErrorHandler.debug(`Received question tool request: ${params.id}`);
-        }
+        this.notifyToolCallListeners(toolCall);
         break;
       }
-      case 'session_created': {
-        const params = notification.params as { sessionId?: string; changeId?: string };
-        if (params.sessionId) {
-          this.currentSessionId = params.sessionId;
-          this.notifySessionCreatedListeners(params.sessionId, params.changeId);
-          this.notifyMessageListeners({
-            type: 'session_created',
-            sessionId: params.sessionId,
-            changeId: params.changeId
-          });
-          ErrorHandler.debug(`Session created: ${params.sessionId}${params.changeId ? ` (change: ${params.changeId})` : ''}`);
-        }
-        break;
-      }
-      default:
-        ErrorHandler.debug(`Unknown notification method: ${notification.method}`);
     }
   }
 
-  async sendMessage(content: string, abortSignal?: AbortSignal): Promise<ParsedResponse> {
-    if (!this.isConnected) {
-      const connected = await this.connect();
-      if (!connected) {
-        throw new Error('Not connected to ACP server');
+  private handleSessionUpdate(update: unknown): void {
+    const u = update as { sessionUpdate?: string; content?: { text?: string }; toolCallId?: string; title?: string; rawInput?: unknown; status?: string };
+    switch (u.sessionUpdate) {
+      case 'agent_message_chunk':
+        if (u.content?.text) {
+          this.notifyMessageListeners({
+            type: 'text_delta',
+            delta: u.content.text,
+            messageId: this.currentSessionId || 'unknown'
+          });
+        }
+        break;
+      case 'user_message_chunk':
+        // User message update, usually from replay
+        break;
+      case 'tool_call': {
+        const toolCall: ToolCall = {
+          id: u.toolCallId || `tool_${Date.now()}`,
+          tool: u.title || 'unknown',
+          params: u.rawInput || {},
+          status: u.status === 'pending' ? 'pending' : 'running',
+          startTime: Date.now()
+        };
+        this.notifyToolCallListeners(toolCall);
+        break;
       }
+      case 'tool_call_update':
+        // Tool call status update
+        break;
+      case 'plan':
+        // Plan/todo update
+        break;
     }
+  }
 
-    const messageId = this.generateRequestId();
-    this.currentResponse = {
-      messageId,
-      content: '',
-      toolCalls: [],
-      isComplete: false,
-      timestamp: Date.now()
-    };
-    this.currentResponseBuffer = '';
-    this.abortController = new AbortController();
+  async sendRequest(request: JsonRpcRequest): Promise<JsonRpcResponse> {
+    return new Promise((resolve, reject) => {
+      if (!this.acpProcess || this.acpProcess.killed) {
+        reject(new Error('ACP process not running'));
+        return;
+      }
 
-    if (abortSignal) {
-      abortSignal.addEventListener('abort', () => {
-        this.cancelStreaming();
+      const timeout = setTimeout(() => {
+        this.pendingRequests.delete(request.id);
+        reject(new Error(`Request ${request.id} timed out`));
+      }, this.config.timeoutMs);
+
+      this.pendingRequests.set(request.id, { resolve, reject, timeout });
+
+      const message = JSON.stringify(request) + '\n';
+      this.acpProcess.stdin?.write(message, (error) => {
+        if (error) {
+          clearTimeout(timeout);
+          this.pendingRequests.delete(request.id);
+          reject(error);
+        }
       });
-    }
+    });
+  }
 
-    const request: JsonRpcRequest = {
-      jsonrpc: '2.0',
-      id: messageId,
-      method: 'send_message',
-      params: { content }
-    };
-
+  async createSession(): Promise<string | undefined> {
     try {
-      const response = await this.sendRequest(request);
+      const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+      if (!workspaceFolder) {
+        throw new Error('No workspace folder');
+      }
+
+      const response = await this.sendRequest({
+        jsonrpc: '2.0',
+        id: ++this.requestId,
+        method: 'session/new',
+        params: {
+          cwd: workspaceFolder.uri.fsPath,
+          mcpServers: []
+        }
+      });
 
       if (response.error) {
         throw new Error(response.error.message);
       }
 
-      return await this.waitForResponseComplete(messageId);
-    } catch (error) {
-      if (error instanceof Error && error.message === 'Streaming cancelled') {
-        return this.createCancelledResponse(messageId);
+      const result = response.result as { sessionId?: string } | undefined;
+      if (result?.sessionId) {
+        this.currentSessionId = result.sessionId;
+        this.notifyMessageListeners({
+          type: 'session_created',
+          sessionId: result.sessionId
+        });
+        return result.sessionId;
       }
+
+      return undefined;
+    } catch (error) {
+      ErrorHandler.handle(error as Error, 'creating ACP session', false);
+      return undefined;
+    }
+  }
+
+  async loadSession(sessionId: string): Promise<boolean> {
+    try {
+      const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+      if (!workspaceFolder) {
+        throw new Error('No workspace folder');
+      }
+
+      const response = await this.sendRequest({
+        jsonrpc: '2.0',
+        id: ++this.requestId,
+        method: 'session/load',
+        params: {
+          sessionId,
+          cwd: workspaceFolder.uri.fsPath,
+          mcpServers: []
+        }
+      });
+
+      if (response.error) {
+        throw new Error(response.error.message);
+      }
+
+      this.currentSessionId = sessionId;
+      return true;
+    } catch (error) {
+      ErrorHandler.handle(error as Error, 'loading ACP session', false);
+      return false;
+    }
+  }
+
+  async sendPrompt(sessionId: string, content: string): Promise<void> {
+    try {
+      const response = await this.sendRequest({
+        jsonrpc: '2.0',
+        id: ++this.requestId,
+        method: 'session/prompt',
+        params: {
+          sessionId,
+          prompt: [{
+            type: 'text',
+            text: content
+          }]
+        }
+      });
+
+      if (response.error) {
+        throw new Error(response.error.message);
+      }
+    } catch (error) {
+      ErrorHandler.handle(error as Error, 'sending prompt to ACP', false);
       throw error;
     }
   }
 
-  cancelStreaming(): ParsedResponse | undefined {
-    let cancelledResponse: ParsedResponse | undefined;
-
-    if (this.abortController) {
-      this.abortController.abort();
-      this.abortController = undefined;
+  async cancelSession(sessionId: string): Promise<void> {
+    try {
+      await this.sendRequest({
+        jsonrpc: '2.0',
+        id: ++this.requestId,
+        method: 'cancel',
+        params: { sessionId }
+      });
+    } catch (error) {
+      ErrorHandler.handle(error as Error, 'canceling ACP session', false);
     }
-
-    if (this.activeStreamMessageId) {
-      cancelledResponse = this.createCancelledResponse(this.activeStreamMessageId);
-      this.notifyMessageListeners({
-        type: 'streaming_cancelled',
-        messageId: this.activeStreamMessageId,
-        partialContent: this.currentResponseBuffer,
-        isPartial: true
-      } as AcpMessage);
-      this.notifyResponseListeners(cancelledResponse);
-      this.activeStreamMessageId = undefined;
-    }
-
-    ErrorHandler.debug('Streaming cancelled by user');
-    return cancelledResponse;
   }
 
-  private createCancelledResponse(messageId: string): ParsedResponse {
+  async answerQuestion(questionId: string, answers: string[]): Promise<void> {
+    try {
+      // This is handled via prompt - send the answer as a user message
+      if (this.currentSessionId) {
+        await this.sendPrompt(
+          this.currentSessionId,
+          `Answer to question ${questionId}: ${answers.join(', ')}`
+        );
+      }
+    } catch (error) {
+      ErrorHandler.handle(error as Error, 'answering question via ACP', false);
+      throw error;
+    }
+  }
+
+  async sendMessage(content: string): Promise<void> {
+    if (!this.currentSessionId) {
+      throw new Error('No active ACP session');
+    }
+    await this.sendPrompt(this.currentSessionId, content);
+  }
+
+  cancelStreaming(): { messageId: string; content: string } | undefined {
+    if (!this.currentSessionId) {
+      return undefined;
+    }
+    
+    // Cancel the current session
+    this.cancelSession(this.currentSessionId).catch(() => {});
+    
+    // Return a cancelled response
     return {
-      messageId,
-      content: this.currentResponseBuffer,
-      toolCalls: Array.from(this.activeToolCalls.values()),
-      isComplete: true,
-      timestamp: Date.now()
+      messageId: this.currentSessionId,
+      content: '[Streaming cancelled by user]'
     };
   }
 
-  private async waitForResponseComplete(messageId: string): Promise<ParsedResponse> {
-    return new Promise((resolve, reject) => {
-      const checkComplete = () => {
-        if (this.abortController?.signal.aborted) {
-          reject(new Error('Streaming cancelled'));
-          return;
+  async startPlanMode(): Promise<boolean> {
+    try {
+      // In ACP, plan mode is just a regular session
+      // The agent will determine the mode based on context
+      if (!this.currentSessionId) {
+        const sessionId = await this.createSession();
+        if (!sessionId) {
+          return false;
         }
-
-        if (this.currentResponse?.messageId === messageId && this.currentResponse.isComplete) {
-          const response = this.currentResponse as ParsedResponse;
-          this.currentResponse = undefined;
-          this.currentResponseBuffer = '';
-          this.abortController = undefined;
-          resolve(response);
-          return;
-        }
-
-        setTimeout(checkComplete, 100);
-      };
-
-      const timeout = setTimeout(() => {
-        reject(new Error('Response timeout'));
-      }, this.config.timeoutMs);
-
-      const disposable = this.onResponse((response) => {
-        if (response.messageId === messageId && response.isComplete) {
-          clearTimeout(timeout);
-          disposable.dispose();
-          resolve(response);
-        }
-      });
-
-      checkComplete();
-    });
-  }
-
-  parseResponse(data: unknown): ParsedResponse {
-    const response: ParsedResponse = {
-      messageId: this.generateRequestId(),
-      content: '',
-      toolCalls: [],
-      isComplete: true,
-      timestamp: Date.now()
-    };
-
-    if (typeof data === 'string') {
-      response.content = data;
-    } else if (typeof data === 'object' && data !== null) {
-      const obj = data as Record<string, unknown>;
-
-      if (typeof obj.messageId === 'string') {
-        response.messageId = obj.messageId;
       }
-
-      if (typeof obj.content === 'string') {
-        response.content = obj.content;
-      } else if (typeof obj.message === 'string') {
-        response.content = obj.message;
-      } else if (typeof obj.text === 'string') {
-        response.content = obj.text;
-      }
-
-      if (Array.isArray(obj.toolCalls)) {
-        response.toolCalls = obj.toolCalls.map((tc: unknown) => this.parseToolCall(tc));
-      } else if (Array.isArray(obj.tool_calls)) {
-        response.toolCalls = obj.tool_calls.map((tc: unknown) => this.parseToolCall(tc));
-      }
-
-      if (typeof obj.isComplete === 'boolean') {
-        response.isComplete = obj.isComplete;
-      }
-
-      if (typeof obj.timestamp === 'number') {
-        response.timestamp = obj.timestamp;
-      }
-    }
-
-    return response;
-  }
-
-  private parseToolCall(data: unknown): ToolCall {
-    const toolCall: ToolCall = {
-      id: this.generateRequestId(),
-      tool: 'unknown',
-      params: {},
-      status: 'pending',
-      startTime: Date.now()
-    };
-
-    if (typeof data === 'object' && data !== null) {
-      const obj = data as Record<string, unknown>;
-
-      if (typeof obj.id === 'string') {
-        toolCall.id = obj.id;
-      }
-
-      if (typeof obj.tool === 'string') {
-        toolCall.tool = obj.tool;
-      } else if (typeof obj.name === 'string') {
-        toolCall.tool = obj.name;
-      } else if (typeof obj.function === 'string') {
-        toolCall.tool = obj.function;
-      }
-
-      if (obj.params !== undefined) {
-        toolCall.params = obj.params;
-      } else if (obj.arguments !== undefined) {
-        toolCall.params = obj.arguments;
-      } else if (obj.parameters !== undefined) {
-        toolCall.params = obj.parameters;
-      }
-
-      if (typeof obj.status === 'string' && ['pending', 'running', 'completed', 'error'].includes(obj.status)) {
-        toolCall.status = obj.status as ToolCall['status'];
-      }
-
-      if (typeof obj.startTime === 'number') {
-        toolCall.startTime = obj.startTime;
-      }
-
-      if (typeof obj.endTime === 'number') {
-        toolCall.endTime = obj.endTime;
-      }
-
-      if (obj.result !== undefined) {
-        toolCall.result = obj.result;
-      }
-
-      if (typeof obj.error === 'string') {
-        toolCall.error = obj.error;
-      }
-    }
-
-    return toolCall;
-  }
-
-  async sendRequest(request: JsonRpcRequest): Promise<JsonRpcResponse> {
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.pendingRequests.delete(request.id);
-        reject(new Error(`Request timeout after ${this.config.timeoutMs}ms`));
-      }, this.config.timeoutMs);
-
-      this.pendingRequests.set(request.id, { resolve, reject, timeout });
-
-      const body = JSON.stringify(request);
-
-      this.httpRequest('POST', '/', body, this.config.timeoutMs)
-        .then((response) => {
-          if (response.statusCode !== 200) {
-            throw new Error(`HTTP error: ${response.statusCode}`);
-          }
-          return response.body;
-        })
-        .then((data) => {
-          const parsed = JSON.parse(data) as JsonRpcResponse;
-          const pending = this.pendingRequests.get(parsed.id);
-
-          if (pending) {
-            clearTimeout(pending.timeout);
-            this.pendingRequests.delete(parsed.id);
-
-            if (parsed.error) {
-              pending.reject(new Error(parsed.error.message));
-            } else {
-              pending.resolve(parsed);
-            }
-          }
-        })
-        .catch((error: Error) => {
-          const pending = this.pendingRequests.get(request.id);
-          if (pending) {
-            clearTimeout(pending.timeout);
-            this.pendingRequests.delete(request.id);
-            pending.reject(error);
-          }
-        });
-    });
-  }
-
-  async sendNotification(notification: JsonRpcNotification): Promise<void> {
-    const body = JSON.stringify(notification);
-    const response = await this.httpRequest('POST', '/', body, this.config.timeoutMs);
-
-    if (response.statusCode !== 200) {
-      throw new Error(`HTTP error: ${response.statusCode}`);
+      return true;
+    } catch (error) {
+      ErrorHandler.handle(error as Error, 'starting ACP plan mode', false);
+      return false;
     }
   }
 
-  private httpRequest(
-    method: string,
-    path: string,
-    body: string | undefined,
-    timeoutMs: number
-  ): Promise<{ statusCode: number; body: string }> {
-    return new Promise((resolve, reject) => {
-      const options: http.RequestOptions = {
-        hostname: this.config.host,
-        port: this.config.port,
-        path: path,
-        method: method,
-        headers: {
-          'Content-Type': 'application/json',
-          'Content-Length': body ? Buffer.byteLength(body) : 0
-        },
-        timeout: timeoutMs
-      };
+  setCurrentSessionId(sessionId: string): void {
+    this.currentSessionId = sessionId;
+  }
 
-      const req = http.request(options, (res) => {
-        let data = '';
-
-        res.on('data', (chunk: Buffer) => {
-          data += chunk.toString();
-        });
-
-        res.on('end', () => {
-          resolve({
-            statusCode: res.statusCode || 0,
-            body: data
-          });
-        });
-      });
-
-      req.on('error', (error: Error) => {
-        reject(error);
-      });
-
-      req.on('timeout', () => {
-        req.destroy();
-        reject(new Error('Request timeout'));
-      });
-
-      if (body) {
-        req.write(body);
-      }
-
-      req.end();
-    });
+  getCurrentSessionId(): string | undefined {
+    return this.currentSessionId;
   }
 
   onMessage(listener: (message: AcpMessage) => void): vscode.Disposable {
     this.messageListeners.push(listener);
-
     return new vscode.Disposable(() => {
       const index = this.messageListeners.indexOf(listener);
       if (index > -1) {
@@ -840,7 +659,8 @@ export class AcpClient {
 
   onConnectionChange(listener: (connected: boolean) => void): vscode.Disposable {
     this.connectionListeners.push(listener);
-
+    // Call immediately with current state
+    listener(this.isClientConnected());
     return new vscode.Disposable(() => {
       const index = this.connectionListeners.indexOf(listener);
       if (index > -1) {
@@ -851,7 +671,6 @@ export class AcpClient {
 
   onToolCall(listener: (toolCall: ToolCall) => void): vscode.Disposable {
     this.toolCallListeners.push(listener);
-
     return new vscode.Disposable(() => {
       const index = this.toolCallListeners.indexOf(listener);
       if (index > -1) {
@@ -860,20 +679,8 @@ export class AcpClient {
     });
   }
 
-  onResponse(listener: (response: ParsedResponse) => void): vscode.Disposable {
-    this.responseListeners.push(listener);
-
-    return new vscode.Disposable(() => {
-      const index = this.responseListeners.indexOf(listener);
-      if (index > -1) {
-        this.responseListeners.splice(index, 1);
-      }
-    });
-  }
-
   onQuestionTool(listener: (question: QuestionToolRequest) => void): vscode.Disposable {
     this.questionToolListeners.push(listener);
-
     return new vscode.Disposable(() => {
       const index = this.questionToolListeners.indexOf(listener);
       if (index > -1) {
@@ -884,7 +691,6 @@ export class AcpClient {
 
   onSessionCreated(listener: (sessionId: string, changeId?: string) => void): vscode.Disposable {
     this.sessionCreatedListeners.push(listener);
-
     return new vscode.Disposable(() => {
       const index = this.sessionCreatedListeners.indexOf(listener);
       if (index > -1) {
@@ -893,8 +699,15 @@ export class AcpClient {
     });
   }
 
-  getActiveToolCalls(): ToolCall[] {
-    return Array.from(this.activeToolCalls.values());
+  onOfflineChange(listener: (state: OfflineState) => void): vscode.Disposable {
+    this.offlineListeners.push(listener);
+    listener(this.offlineState);
+    return new vscode.Disposable(() => {
+      const index = this.offlineListeners.indexOf(listener);
+      if (index > -1) {
+        this.offlineListeners.splice(index, 1);
+      }
+    });
   }
 
   private notifyMessageListeners(message: AcpMessage): void {
@@ -927,16 +740,6 @@ export class AcpClient {
     });
   }
 
-  private notifyResponseListeners(response: ParsedResponse): void {
-    this.responseListeners.forEach(listener => {
-      try {
-        listener(response);
-      } catch (error) {
-        ErrorHandler.debug(`Error in response listener: ${error}`);
-      }
-    });
-  }
-
   private notifyQuestionToolListeners(question: QuestionToolRequest): void {
     this.questionToolListeners.forEach(listener => {
       try {
@@ -957,423 +760,64 @@ export class AcpClient {
     });
   }
 
-  disconnect(): void {
-    if (this.sseReconnectTimer) {
-      clearTimeout(this.sseReconnectTimer);
-      this.sseReconnectTimer = undefined;
-    }
+  private updateOfflineState(isOffline: boolean): void {
+    this.offlineState = {
+      isOffline,
+      pendingMessageCount: this.messageQueue.length,
+      offlineSince: isOffline ? Date.now() : undefined,
+      lastConnectedAt: !isOffline ? Date.now() : this.lastSuccessfulConnection
+    };
 
-    if (this.sseConnection) {
-      this.sseConnection.destroy();
-      this.sseConnection = undefined;
-    }
-
-    this.pendingRequests.forEach((pending) => {
-      clearTimeout(pending.timeout);
-      pending.reject(new Error('Client disconnected'));
+    this.offlineListeners.forEach(listener => {
+      try {
+        listener(this.offlineState);
+      } catch (error) {
+        ErrorHandler.debug(`Error in offline listener: ${error}`);
+      }
     });
-    this.pendingRequests.clear();
-
-    this.isConnected = false;
-    this.activeStreamMessageId = undefined;
-    this.updateOfflineState(true);
-    this.notifyConnectionListeners(false);
-
-    ErrorHandler.debug('AcpClient disconnected');
-  }
-
-  isClientConnected(): boolean {
-    return this.isConnected;
-  }
-
-  private generateRequestId(): string {
-    return `req_${++this.requestId}_${Date.now()}`;
-  }
-
-  private delay(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
-
-  dispose(): void {
-    this.disconnect();
-    this.stopOfflineRetry();
-    this.messageListeners = [];
-    this.connectionListeners = [];
-    this.toolCallListeners = [];
-    this.responseListeners = [];
-    this.offlineListeners = [];
-    this.questionToolListeners = [];
-    this.sessionCreatedListeners = [];
-    this.activeToolCalls.clear();
-    this.currentResponse = undefined;
-    this.currentResponseBuffer = '';
-    this.messageQueue = [];
-    this.pendingQuestions.clear();
-  }
-
-  // Plan Mode Methods
-
-  configurePlanMode(config: Partial<PlanModeConfig>): void {
-    this.planModeConfig = { ...this.planModeConfig, ...config };
-    ErrorHandler.debug(`Plan mode configured: ${JSON.stringify(this.planModeConfig)}`);
-  }
-
-  getPlanModeConfig(): PlanModeConfig {
-    return { ...this.planModeConfig };
-  }
-
-  async startPlanMode(): Promise<boolean> {
-    if (this.planModeConfig.enabled) {
-      ErrorHandler.debug('Plan mode already enabled');
-      return true;
-    }
-
-    try {
-      ErrorHandler.debug('Starting ACP plan mode...');
-      
-      // Connect to ACP server first
-      const connected = await this.connect();
-      if (!connected) {
-        throw new Error('Failed to connect to ACP server for plan mode');
-      }
-
-      // Enable plan mode
-      this.planModeConfig.enabled = true;
-
-      // Send initial prompt to load openspec skill
-      const request: JsonRpcRequest = {
-        jsonrpc: '2.0',
-        id: this.generateRequestId(),
-        method: 'start_plan_mode',
-        params: {
-          skill: this.planModeConfig.skillName,
-          initialPrompt: this.planModeConfig.initialPrompt
-        }
-      };
-
-      const response = await this.sendRequest(request);
-      
-      if (response.error) {
-        throw new Error(response.error.message);
-      }
-
-      ErrorHandler.debug('Plan mode started successfully');
-      
-      // Send the initial prompt as the first message
-      await this.sendMessage(this.planModeConfig.initialPrompt);
-      
-      return true;
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      ErrorHandler.debug(`Failed to start plan mode: ${errorMessage}`);
-      this.planModeConfig.enabled = false;
-      return false;
-    }
-  }
-
-  async stopPlanMode(): Promise<void> {
-    if (!this.planModeConfig.enabled) {
-      return;
-    }
-
-    try {
-      const request: JsonRpcRequest = {
-        jsonrpc: '2.0',
-        id: this.generateRequestId(),
-        method: 'stop_plan_mode',
-        params: {}
-      };
-
-      await this.sendRequest(request);
-      ErrorHandler.debug('Plan mode stopped');
-    } catch (error) {
-      ErrorHandler.debug(`Error stopping plan mode: ${error}`);
-    } finally {
-      this.planModeConfig.enabled = false;
-    }
-  }
-
-  isPlanModeEnabled(): boolean {
-    return this.planModeConfig.enabled;
-  }
-
-  // Question Tool Methods
-
-  async answerQuestion(questionId: string, answers: string[]): Promise<boolean> {
-    const question = this.pendingQuestions.get(questionId);
-    if (!question) {
-      ErrorHandler.debug(`Question ${questionId} not found or already answered`);
-      return false;
-    }
-
-    try {
-      const response: QuestionToolResponse = {
-        questionId,
-        answers
-      };
-
-      const request: JsonRpcRequest = {
-        jsonrpc: '2.0',
-        id: this.generateRequestId(),
-        method: 'question_tool_response',
-        params: response
-      };
-
-      const result = await this.sendRequest(request);
-      
-      if (result.error) {
-        throw new Error(result.error.message);
-      }
-
-      // Remove from pending questions
-      this.pendingQuestions.delete(questionId);
-      
-      ErrorHandler.debug(`Question ${questionId} answered with ${answers.length} answer(s)`);
-      return true;
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      ErrorHandler.debug(`Failed to answer question ${questionId}: ${errorMessage}`);
-      return false;
-    }
-  }
-
-  getPendingQuestions(): QuestionToolRequest[] {
-    return Array.from(this.pendingQuestions.values());
-  }
-
-  hasPendingQuestions(): boolean {
-    return this.pendingQuestions.size > 0;
-  }
-
-  // Session Management
-
-  getCurrentSessionId(): string | undefined {
-    return this.currentSessionId;
-  }
-
-  setCurrentSessionId(sessionId: string): void {
-    this.currentSessionId = sessionId;
-    ErrorHandler.debug(`Session ID set: ${sessionId}`);
   }
 
   clearSession(): void {
     this.currentSessionId = undefined;
-    this.pendingQuestions.clear();
-    ErrorHandler.debug('Session cleared');
   }
 
-  // Graceful degradation methods - Offline mode support
-  
-  private updateOfflineState(isOffline: boolean): void {
-    if (this.offlineState.isOffline !== isOffline) {
-      this.offlineState.isOffline = isOffline;
-      
-      if (isOffline) {
-        this.offlineState.offlineSince = Date.now();
-        this.startOfflineRetry();
-        ErrorHandler.debug('ACP client entered offline mode', 'acpClient', {
-          queuedMessages: this.messageQueue.length,
-          offlineSince: this.offlineState.offlineSince
-        });
-      } else {
-        this.offlineState.lastConnectedAt = Date.now();
-        this.offlineState.offlineSince = undefined;
-        this.stopOfflineRetry();
-        ErrorHandler.debug('ACP client left offline mode', 'acpClient', {
-          lastConnectedAt: this.offlineState.lastConnectedAt
-        });
-      }
-      
-      this.offlineState.pendingMessageCount = this.messageQueue.length;
-      this.notifyOfflineListeners();
-    }
-  }
-
-  private startOfflineRetry(): void {
-    if (this.offlineRetryTimer) {
-      return;
-    }
-    
-    ErrorHandler.debug('Starting offline retry timer', 'acpClient');
-    
-    this.offlineRetryTimer = setInterval(async () => {
-      if (!this.isConnected && this.messageQueue.length > 0) {
-        ErrorHandler.debug(`Attempting to reconnect to send ${this.messageQueue.length} queued messages`, 'acpClient');
-        
-        try {
-          const connected = await this.connect();
-          if (connected) {
-            await this.processMessageQueue();
-          }
-        } catch (error) {
-          ErrorHandler.debug(`Offline retry failed: ${error}`, 'acpClient');
-        }
-      }
-    }, AcpClient.OFFLINE_RETRY_INTERVAL);
-  }
-
-  private stopOfflineRetry(): void {
-    if (this.offlineRetryTimer) {
-      clearInterval(this.offlineRetryTimer);
-      this.offlineRetryTimer = undefined;
-      ErrorHandler.debug('Stopped offline retry timer', 'acpClient');
-    }
-  }
-
-  private async processMessageQueue(): Promise<void> {
-    if (this.messageQueue.length === 0) {
-      return;
-    }
-
-    ErrorHandler.debug(`Processing ${this.messageQueue.length} queued messages`, 'acpClient');
-
-    // Process messages in order
-    while (this.messageQueue.length > 0) {
-      const queuedMessage = this.messageQueue[0];
-      
-      try {
-        // Update UI to show retrying state
-        this.notifyMessageListeners({
-          type: 'status',
-          status: `Retrying message ${queuedMessage.id}...`
-        });
-
-        await this.sendMessage(queuedMessage.content, queuedMessage.abortSignal);
-        
-        // Remove successfully sent message
-        this.messageQueue.shift();
-        ErrorHandler.debug(`Successfully sent queued message: ${queuedMessage.id}`, 'acpClient');
-      } catch (error) {
-        queuedMessage.retryCount++;
-        
-        if (queuedMessage.retryCount >= 3) {
-          // Give up on this message after 3 retries
-          ErrorHandler.debug(`Giving up on queued message after 3 retries: ${queuedMessage.id}`, 'acpClient');
-          this.notifyMessageListeners({
-            type: 'error',
-            message: `Failed to send message after multiple retries: ${queuedMessage.content.substring(0, 100)}...`
-          });
-          this.messageQueue.shift();
-        } else {
-          // Stop processing queue if a message fails - will retry on next interval
-          ErrorHandler.debug(`Message ${queuedMessage.id} failed (retry ${queuedMessage.retryCount}), stopping queue processing`, 'acpClient');
-          break;
-        }
-      }
-    }
-
-    this.offlineState.pendingMessageCount = this.messageQueue.length;
-    this.notifyOfflineListeners();
-  }
-
-  queueMessage(content: string, abortSignal?: AbortSignal): QueuedMessage {
-    // Check if queue is full
-    if (this.messageQueue.length >= AcpClient.MAX_QUEUED_MESSAGES) {
-      // Remove oldest message
-      const removed = this.messageQueue.shift();
-      ErrorHandler.debug(`Queue full, removed oldest message: ${removed?.id}`, 'acpClient');
-      
-      // Notify that message was dropped
-      if (removed) {
-        this.notifyMessageListeners({
-          type: 'error',
-          message: 'Message queue full. Oldest message was dropped.'
-        });
-      }
-    }
-
-    const queuedMessage: QueuedMessage = {
-      id: this.generateRequestId(),
+  getQueuedMessages(): { id: string; content: string; timestamp: number; retryCount: number }[] {
+    return this.messageQueue.map((content, index) => ({
+      id: `queued_${index}`,
       content,
       timestamp: Date.now(),
-      retryCount: 0,
-      abortSignal
-    };
+      retryCount: 0
+    }));
+  }
 
-    this.messageQueue.push(queuedMessage);
-    this.offlineState.pendingMessageCount = this.messageQueue.length;
-    this.notifyOfflineListeners();
-
-    ErrorHandler.debug(`Message queued (queue size: ${this.messageQueue.length})`, 'acpClient', {
-      messageId: queuedMessage.id,
-      contentPreview: content.substring(0, 50)
-    });
-
-    return queuedMessage;
+  clearMessageQueue(): void {
+    this.messageQueue = [];
+    this.updateOfflineState(this.offlineState.isOffline);
   }
 
   getOfflineState(): OfflineState {
     return { ...this.offlineState };
   }
 
-  getQueuedMessages(): QueuedMessage[] {
-    return [...this.messageQueue];
-  }
-
-  clearMessageQueue(): void {
-    const count = this.messageQueue.length;
-    this.messageQueue = [];
-    this.offlineState.pendingMessageCount = 0;
-    this.notifyOfflineListeners();
-    ErrorHandler.debug(`Cleared message queue (${count} messages removed)`, 'acpClient');
-  }
-
-  onOfflineChange(listener: (state: OfflineState) => void): vscode.Disposable {
-    this.offlineListeners.push(listener);
-    
-    // Immediately notify with current state
-    listener({ ...this.offlineState });
-    
-    return new vscode.Disposable(() => {
-      const index = this.offlineListeners.indexOf(listener);
-      if (index > -1) {
-        this.offlineListeners.splice(index, 1);
-      }
-    });
-  }
-
-  private notifyOfflineListeners(): void {
-    this.offlineListeners.forEach(listener => {
-      try {
-        listener({ ...this.offlineState });
-      } catch (error) {
-        ErrorHandler.debug(`Error in offline listener: ${error}`, 'acpClient');
-      }
-    });
-  }
-
-  // Override sendMessage to support offline mode
-  async sendMessageWithOfflineSupport(content: string, abortSignal?: AbortSignal): Promise<ParsedResponse | null> {
-    // Try to send immediately if connected
-    if (this.isConnected) {
-      try {
-        return await this.sendMessage(content, abortSignal);
-      } catch (error) {
-        // If send fails, enter offline mode and queue the message
-        ErrorHandler.debug(`Send failed, entering offline mode: ${error}`, 'acpClient');
-        this.updateOfflineState(true);
-      }
+  dispose(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = undefined;
     }
 
-    // Not connected or send failed - queue for later
-    if (!this.isConnected) {
-      this.updateOfflineState(true);
-      const queuedMessage = this.queueMessage(content, abortSignal);
-      
-      ErrorHandler.debug('Message queued for later delivery', 'acpClient', {
-        messageId: queuedMessage.id,
-        queueSize: this.messageQueue.length
-      });
-      
-      // Notify UI that message is queued
-      this.notifyMessageListeners({
-        type: 'status',
-        status: `Server unavailable. Message queued (#${this.messageQueue.length} pending)`
-      });
-      
-      return null;
+    this.pendingRequests.forEach(request => {
+      clearTimeout(request.timeout);
+      request.reject(new Error('Client disposed'));
+    });
+    this.pendingRequests.clear();
+
+    if (this.acpProcess && !this.acpProcess.killed) {
+      this.acpProcess.kill('SIGTERM');
     }
 
-    return null;
+    this.messageListeners = [];
+    this.connectionListeners = [];
+    this.toolCallListeners = [];
+    this.offlineListeners = [];
   }
 }
