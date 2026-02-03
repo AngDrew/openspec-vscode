@@ -16,23 +16,37 @@ import { ExtensionRuntimeState } from './extension/runtime';
 let runtime: ExtensionRuntimeState | undefined;
 
 export async function activate(context: vscode.ExtensionContext) {
-  console.log('OpenSpec extension is now active!');
-
-  // Initialize error handling and cache
-  ErrorHandler.initialize();
+  console.log('[OpenSpec] Extension activation started');
+  
+  try {
+    // Initialize error handling and cache
+    ErrorHandler.initialize();
+    ErrorHandler.debug('[OpenSpec] ErrorHandler initialized');
 
   // Initialize PortManager with context
   PortManager.getInstance().initialize(context);
 
-  runtime = await activateExtension(context);
-  runtime.cacheManager = CacheManager.getInstance();
+  try {
+    runtime = await activateExtension(context);
+    runtime.cacheManager = CacheManager.getInstance();
+  } catch (error) {
+    ErrorHandler.handle(error as Error, 'Failed to activate extension runtime', true);
+    throw error;
+  }
 
-  // Register the tree data provider
-  runtime.explorerProvider = new OpenSpecExplorerProvider();
-  context.subscriptions.push(
-    vscode.window.registerTreeDataProvider('openspecExplorer', runtime.explorerProvider),
-    vscode.window.registerTreeDataProvider('openspecWelcome', runtime.explorerProvider)
-  );
+  // Register the tree data provider FIRST (before any awaits)
+  try {
+    runtime.explorerProvider = new OpenSpecExplorerProvider();
+    const explorerDisposable = vscode.window.registerTreeDataProvider('openspecExplorer', runtime.explorerProvider);
+    const welcomeDisposable = vscode.window.registerTreeDataProvider('openspecWelcome', runtime.explorerProvider);
+    context.subscriptions.push(explorerDisposable, welcomeDisposable);
+    ErrorHandler.debug('Tree data providers registered successfully');
+    
+    // Trigger initial refresh to ensure data is loaded
+    runtime.explorerProvider.refresh();
+  } catch (error) {
+    ErrorHandler.handle(error as Error, 'Failed to register tree data provider', true);
+  }
 
   // Register the webview provider
   runtime.webviewProvider = new OpenSpecWebviewProvider(context.extensionUri);
@@ -41,11 +55,16 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   // Register the chat view provider (sidebar view)
-  const chatViewProvider = new ChatViewProvider(context.extensionUri);
-  context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider(ChatViewProvider.viewType, chatViewProvider)
-  );
-  runtime.chatProvider = chatViewProvider as unknown as typeof runtime.chatProvider;
+  try {
+    const chatViewProvider = new ChatViewProvider(context.extensionUri);
+    context.subscriptions.push(
+      vscode.window.registerWebviewViewProvider(ChatViewProvider.viewType, chatViewProvider)
+    );
+    runtime.chatProvider = chatViewProvider as unknown as typeof runtime.chatProvider;
+    ErrorHandler.debug('Chat view provider registered successfully');
+  } catch (error) {
+    ErrorHandler.handle(error as Error, 'Failed to register chat view provider', true);
+  }
 
   // Set context keys for chat
   const config = vscode.workspace.getConfiguration('openspec');
@@ -79,14 +98,21 @@ export async function activate(context: vscode.ExtensionContext) {
     })
   );
 
+  // Set initial context to false (will be updated by checkWorkspaceInitialization)
+  vscode.commands.executeCommand('setContext', 'openspec:initialized', false);
+  
+  // Check workspace initialization EARLY (before other async operations)
+  checkWorkspaceInitialization(runtime);
+
   // Set up file system watcher
   registerOpenSpecWatcher(context, runtime);
 
-  // Check workspace initialization
-  checkWorkspaceInitialization(runtime);
-
   // Log activation success
   ErrorHandler.info('Extension activated successfully', false);
+  } catch (error) {
+    console.error('[OpenSpec] Extension activation failed:', error);
+    throw error;
+  }
 }
 
 export function deactivate() {

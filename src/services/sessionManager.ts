@@ -380,22 +380,8 @@ export class SessionManager {
         return false;
       }
 
-      // Send a validation request to the ACP server
-      const request = {
-        jsonrpc: '2.0' as const,
-        id: `validate_${Date.now()}`,
-        method: 'validate_session',
-        params: { sessionId: acpSessionId }
-      };
-
-      const response = await acpClient.sendRequest(request);
-      
-      if (response.error) {
-        ErrorHandler.debug(`Session validation failed for ${acpSessionId}: ${response.error.message}`);
-        return false;
-      }
-
-      const isValid = response.result === true;
+      // Validate the session using ACP's loadSession method
+      const isValid = await acpClient.validateSession(acpSessionId);
       ErrorHandler.debug(`Session ${acpSessionId} validation result: ${isValid}`);
       
       return isValid;

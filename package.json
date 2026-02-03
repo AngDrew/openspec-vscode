@@ -1,5 +1,5 @@
 {
-  "name": "openspec-vscode",
+  "name": "openspec-vscode-dev",
   "displayName": "OpenSpecCodeExplorer",
   "description": "VS Code extension for OpenSpec spec-driven development workflow",
   "version": "2.0.0",
@@ -21,6 +21,8 @@
   "activationEvents": [
     "onStartupFinished",
     "onCommand:openspec.chat.open",
+    "onView:openspecExplorer",
+    "onView:openspecWelcome",
     "onView:openspecChat"
   ],
   "main": "./out/extension.js",
@@ -49,8 +51,8 @@
         {
           "id": "openspecChat",
           "name": "OpenSpec Chat",
-          "when": "openspec:initialized && openspec:chatEnabled",
-          "icon": "$(comment-discussion)"
+          "type": "webview",
+          "when": "openspec:initialized && openspec:chatEnabled"
         }
       ]
     },

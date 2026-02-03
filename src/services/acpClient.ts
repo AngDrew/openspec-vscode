@@ -2,87 +2,22 @@ import * as vscode from 'vscode';
 import { spawn, ChildProcess } from 'child_process';
 import { ErrorHandler } from '../utils/errorHandler';
 import { PortManager } from './portManager';
-
-// ACP JSON-RPC types
-export interface JsonRpcRequest {
-  jsonrpc: '2.0';
-  id: string | number;
-  method: string;
-  params?: unknown;
-}
-
-export interface JsonRpcResponse {
-  jsonrpc: '2.0';
-  id: string | number;
-  result?: unknown;
-  error?: {
-    code: number;
-    message: string;
-    data?: unknown;
-  };
-}
-
-export interface JsonRpcNotification {
-  jsonrpc: '2.0';
-  method: string;
-  params?: unknown;
-}
-
-export interface ToolCall {
-  id: string;
-  tool: string;
-  params: unknown;
-  status: 'pending' | 'running' | 'completed' | 'error';
-  startTime: number;
-  endTime?: number;
-  result?: unknown;
-  error?: string;
-}
-
-export interface ParsedResponse {
-  messageId: string;
-  content: string;
-  toolCalls: ToolCall[];
-  isComplete: boolean;
-  timestamp: number;
-}
-
-export interface QuestionToolRequest {
-  id: string;
-  question: string;
-  options?: string[];
-  allowMultiple?: boolean;
-  allowCustom?: boolean;
-}
-
-export type AcpMessage =
-  | { type: 'text'; content: string; messageId?: string }
-  | { type: 'text_delta'; delta: string; messageId: string }
-  | { type: 'tool_call'; tool: string; params: unknown; id: string }
-  | { type: 'tool_result'; tool: string; result: unknown; id: string }
-  | { type: 'error'; message: string }
-  | { type: 'status'; status: string }
-  | { type: 'streaming_start'; messageId: string }
-  | { type: 'streaming_end'; messageId: string }
-  | { type: 'streaming_cancelled'; messageId: string; partialContent: string; isPartial: boolean }
-  | { type: 'response_complete'; response: ParsedResponse }
-  | { type: 'question_tool'; question: QuestionToolRequest }
-  | { type: 'session_created'; sessionId: string; changeId?: string };
-
-export interface AcpConnectionConfig {
-  host: string;
-  port: number;
-  timeoutMs: number;
-  retryAttempts: number;
-  retryDelayMs: number;
-}
-
-export interface OfflineState {
-  isOffline: boolean;
-  lastConnectedAt?: number;
-  offlineSince?: number;
-  pendingMessageCount: number;
-}
+import { AcpTransport } from './acpTransport';
+import {
+  InitializeRequest, InitializeResponse, NewSessionRequest, NewSessionResponse,
+  LoadSessionRequest, LoadSessionResponse, PromptRequest, PromptResponse,
+  CancelNotification, SetSessionModeRequest, SetSessionModelRequest,
+  SessionNotification, ReadTextFileRequest, ReadTextFileResponse,
+  WriteTextFileRequest, WriteTextFileResponse, RequestPermissionRequest,
+  RequestPermissionResponse, CreateTerminalRequest, CreateTerminalResponse,
+  TerminalOutputRequest, TerminalOutputResponse, WaitForTerminalExitRequest,
+  WaitForTerminalExitResponse, KillTerminalCommandRequest, KillTerminalCommandResponse,
+  ReleaseTerminalRequest, ReleaseTerminalResponse, ToolCall, AcpMessage,
+  QuestionToolRequest, AcpConnectionConfig, OfflineState, ACP_METHODS,
+  AgentMessageChunkUpdate, ToolCallUpdate, ToolCallUpdateUpdate, PlanUpdate,
+  AvailableCommandsUpdate, CurrentModeUpdate, AgentThoughtChunkUpdate,
+  SessionModeState, SessionModelState, AvailableCommand
+} from './acpTypes';
 
 export class AcpClient {
   private static readonly DEFAULT_TIMEOUT = 30000;
@@ -92,28 +27,41 @@ export class AcpClient {
   private static readonly MAX_QUEUED_MESSAGES = 50;
   private static readonly OFFLINE_RETRY_INTERVAL = 30000;
   private static instance: AcpClient;
+  
   private portManager: PortManager;
   private config: AcpConnectionConfig;
-  private requestId = 0;
-  private pendingRequests = new Map<string | number, {
-    resolve: (value: JsonRpcResponse) => void;
-    reject: (reason: Error) => void;
-    timeout: NodeJS.Timeout;
-  }>();
+  private transport: AcpTransport | undefined;
+  private acpProcess: ChildProcess | undefined;
+  
+  private isConnected = false;
+  private isConnecting = false;
+  private currentSessionId: string | undefined;
+  private sessionMetadata: {
+    modes: SessionModeState | null;
+    models: SessionModelState | null;
+    commands: AvailableCommand[] | null;
+  } = { modes: null, models: null, commands: null };
+  
   private messageListeners: Array<(message: AcpMessage) => void> = [];
   private connectionListeners: Array<(connected: boolean) => void> = [];
   private toolCallListeners: Array<(toolCall: ToolCall) => void> = [];
   private questionToolListeners: Array<(question: QuestionToolRequest) => void> = [];
   private sessionCreatedListeners: Array<(sessionId: string, changeId?: string) => void> = [];
-  private isConnected = false;
-  private currentSessionId: string | undefined;
-  private acpProcess: ChildProcess | undefined;
-  private messageQueue: string[] = [];
-  private offlineState: OfflineState = { isOffline: false, pendingMessageCount: 0 };
   private offlineListeners: Array<(state: OfflineState) => void> = [];
+  private offlineState: OfflineState = { isOffline: false, pendingMessageCount: 0 };
+  private messageQueue: string[] = [];
   private lastSuccessfulConnection: number | undefined;
   private reconnectTimer: NodeJS.Timeout | undefined;
-  private isConnecting = false;
+  
+  // Client capability handlers
+  private readTextFileHandler: ((params: ReadTextFileRequest) => Promise<ReadTextFileResponse>) | null = null;
+  private writeTextFileHandler: ((params: WriteTextFileRequest) => Promise<WriteTextFileResponse>) | null = null;
+  private requestPermissionHandler: ((params: RequestPermissionRequest) => Promise<RequestPermissionResponse>) | null = null;
+  private createTerminalHandler: ((params: CreateTerminalRequest) => Promise<CreateTerminalResponse>) | null = null;
+  private terminalOutputHandler: ((params: TerminalOutputRequest) => Promise<TerminalOutputResponse>) | null = null;
+  private waitForTerminalExitHandler: ((params: WaitForTerminalExitRequest) => Promise<WaitForTerminalExitResponse>) | null = null;
+  private killTerminalHandler: ((params: KillTerminalCommandRequest) => Promise<KillTerminalCommandResponse>) | null = null;
+  private releaseTerminalHandler: ((params: ReleaseTerminalRequest) => Promise<ReleaseTerminalResponse>) | null = null;
 
   private constructor() {
     this.portManager = PortManager.getInstance();
@@ -143,15 +91,14 @@ export class AcpClient {
   }
 
   isClientConnected(): boolean {
-    return this.isConnected && this.acpProcess !== undefined && !this.acpProcess.killed;
+    return this.isConnected && !!this.transport?.isTransportConnected();
   }
 
   async connect(): Promise<boolean> {
     if (this.isConnecting) {
       ErrorHandler.debug('Connection already in progress, waiting...');
-      // Wait for connection to complete
       let attempts = 0;
-      while (this.isConnecting && attempts < 20) {
+      while (this.isConnecting && attempts < 50) {
         await this.delay(100);
         attempts++;
       }
@@ -222,34 +169,35 @@ export class AcpClient {
     }
 
     // Check if HTTP server is already running on this port
+    let httpRunning = false;
     try {
-      const isRunning = await this.checkHttpServer(port);
-      if (isRunning) {
+      httpRunning = await this.checkHttpServer(port);
+      if (httpRunning) {
         ErrorHandler.debug(`HTTP server already running on port ${port}`);
-        // Start ACP process which will connect to existing server
-        await this.startAcpProcess(port, workspaceFolder.uri.fsPath);
-        return true;
       }
     } catch {
       // Server not running, we'll start it
     }
 
-    // Start ACP server (which also starts HTTP server)
+    // Start ACP process
     await this.startAcpProcess(port, workspaceFolder.uri.fsPath);
-    
-    // Wait for HTTP server to be ready
-    let attempts = 0;
-    const maxAttempts = 30;
-    while (attempts < maxAttempts) {
-      await this.delay(500);
-      const isReady = await this.checkHttpServer(port);
-      if (isReady) {
-        return true;
+
+    // If HTTP wasn't running, wait for it to be ready
+    if (!httpRunning) {
+      let attempts = 0;
+      const maxAttempts = 30;
+      while (attempts < maxAttempts) {
+        await this.delay(500);
+        const isReady = await this.checkHttpServer(port);
+        if (isReady) {
+          return true;
+        }
+        attempts++;
       }
-      attempts++;
+      throw new Error(`HTTP server did not start within ${maxAttempts * 500}ms`);
     }
 
-    throw new Error(`ACP server did not start within ${maxAttempts * 500}ms`);
+    return true;
   }
 
   private async checkHttpServer(port: number): Promise<boolean> {
@@ -269,215 +217,252 @@ export class AcpClient {
   }
 
   private async startAcpProcess(port: number, cwd: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-      // Check if we already have a process running
-      if (this.acpProcess && !this.acpProcess.killed) {
-        ErrorHandler.debug('ACP process already running, reusing');
-        resolve();
-        return;
-      }
+    // Kill existing process if any
+    if (this.acpProcess && !this.acpProcess.killed) {
+      ErrorHandler.debug('Killing existing ACP process');
+      this.acpProcess.kill('SIGTERM');
+      await this.delay(500);
+    }
 
-      ErrorHandler.debug(`Starting ACP process on port ${port}...`);
+    ErrorHandler.debug(`Starting ACP process on port ${port}...`);
 
-      this.acpProcess = spawn('opencode', ['acp', '--port', String(port), '--hostname', '127.0.0.1', '--print-logs'], {
-        cwd,
-        stdio: ['pipe', 'pipe', 'pipe']
-      });
-
-      let buffer = '';
-
-      this.acpProcess.stdout?.on('data', (data: Buffer) => {
-        buffer += data.toString();
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || ''; // Keep incomplete line in buffer
-
-        for (const line of lines) {
-          if (line.trim()) {
-            this.handleAcpLine(line.trim());
-          }
-        }
-      });
-
-      this.acpProcess.stderr?.on('data', (data: Buffer) => {
-        const message = data.toString().trim();
-        if (message) {
-          ErrorHandler.debug(`ACP stderr: ${message}`);
-        }
-      });
-
-      this.acpProcess.on('error', (error) => {
-        ErrorHandler.handle(error, 'ACP process error', false);
-        this.isConnected = false;
-        this.notifyConnectionListeners(false);
-        reject(error);
-      });
-
-      this.acpProcess.on('exit', (code) => {
-        ErrorHandler.debug(`ACP process exited with code ${code}`);
-        this.isConnected = false;
-        this.notifyConnectionListeners(false);
-        
-        // Schedule reconnect
-        if (!this.reconnectTimer) {
-          this.reconnectTimer = setTimeout(() => {
-            this.reconnectTimer = undefined;
-            if (!this.isClientConnected()) {
-              ErrorHandler.debug('Attempting to reconnect ACP...');
-              this.connect().catch(() => {});
-            }
-          }, 5000);
-        }
-      });
-
-      // Give it a moment to start
-      setTimeout(() => {
-        if (this.acpProcess && !this.acpProcess.killed) {
-          resolve();
-        } else {
-          reject(new Error('ACP process failed to start'));
-        }
-      }, 1000);
+    // Start opencode acp without --print-logs to avoid stdout pollution
+    this.acpProcess = spawn('opencode', ['acp', '--port', String(port), '--hostname', '127.0.0.1'], {
+      cwd,
+      stdio: ['pipe', 'pipe', 'pipe']
     });
+
+    // Create transport
+    this.transport = new AcpTransport(
+      (method, params) => this.handleAgentRequest(method, params),
+      (method, params) => this.handleAgentNotification(method, params),
+      {
+        timeoutMs: this.config.timeoutMs,
+        onDisconnect: () => {
+          this.isConnected = false;
+          this.notifyConnectionListeners(false);
+          this.scheduleReconnect();
+        },
+        onError: (error) => {
+          ErrorHandler.handle(error, 'ACP transport error', false);
+        }
+      }
+    );
+
+    // Connect transport
+    await this.transport.connect(this.acpProcess);
+
+    // Initialize the connection
+    const initRequest: InitializeRequest = {
+      protocolVersion: 1,
+      clientCapabilities: {
+        fs: {
+          readTextFile: true,
+          writeTextFile: true
+        },
+        terminal: true
+      },
+      clientInfo: {
+        name: 'openspec-vscode',
+        version: '2.0.0'
+      }
+    };
+
+    const initResponse = await this.sendRequest<InitializeResponse>(
+      ACP_METHODS.initialize,
+      initRequest
+    );
+
+    ErrorHandler.debug(`ACP initialized: protocol v${initResponse.protocolVersion}`);
   }
 
-  private handleAcpLine(line: string): void {
-    try {
-      const message = JSON.parse(line);
-      
-      // Check if it's a response to a pending request
-      if (message.id !== undefined && this.pendingRequests.has(message.id)) {
-        const request = this.pendingRequests.get(message.id);
-        if (request) {
-          clearTimeout(request.timeout);
-          this.pendingRequests.delete(message.id);
-          
-          if (message.error) {
-            request.reject(new Error(message.error.message || 'Unknown error'));
-          } else {
-            request.resolve(message);
+  private async handleAgentRequest(method: string, params: unknown): Promise<unknown> {
+    switch (method) {
+      case ACP_METHODS.fsReadTextFile:
+        if (this.readTextFileHandler) {
+          return this.readTextFileHandler(params as ReadTextFileRequest);
+        }
+        throw new Error('readTextFile not implemented');
+
+      case ACP_METHODS.fsWriteTextFile:
+        if (this.writeTextFileHandler) {
+          return this.writeTextFileHandler(params as WriteTextFileRequest);
+        }
+        throw new Error('writeTextFile not implemented');
+
+      case ACP_METHODS.sessionRequestPermission:
+        if (this.requestPermissionHandler) {
+          return this.requestPermissionHandler(params as RequestPermissionRequest);
+        }
+        // Auto-approve by default
+        return {
+          outcome: {
+            outcome: 'selected',
+            optionId: 'allow_once'
           }
-        }
-        return;
-      }
+        } as RequestPermissionResponse;
 
-      // Handle notifications/messages
-      if (message.method) {
-        this.handleNotification(message);
-      }
-    } catch {
-      // Not valid JSON, might be log output
-      ErrorHandler.debug(`ACP output: ${line}`);
+      case ACP_METHODS.terminalCreate:
+        if (this.createTerminalHandler) {
+          return this.createTerminalHandler(params as CreateTerminalRequest);
+        }
+        throw new Error('terminal/create not implemented');
+
+      case ACP_METHODS.terminalOutput:
+        if (this.terminalOutputHandler) {
+          return this.terminalOutputHandler(params as TerminalOutputRequest);
+        }
+        throw new Error('terminal/output not implemented');
+
+      case ACP_METHODS.terminalWaitForExit:
+        if (this.waitForTerminalExitHandler) {
+          return this.waitForTerminalExitHandler(params as WaitForTerminalExitRequest);
+        }
+        throw new Error('terminal/wait_for_exit not implemented');
+
+      case ACP_METHODS.terminalKill:
+        if (this.killTerminalHandler) {
+          return this.killTerminalHandler(params as KillTerminalCommandRequest);
+        }
+        throw new Error('terminal/kill not implemented');
+
+      case ACP_METHODS.terminalRelease:
+        if (this.releaseTerminalHandler) {
+          return this.releaseTerminalHandler(params as ReleaseTerminalRequest);
+        }
+        throw new Error('terminal/release not implemented');
+
+      default:
+        throw new Error(`Unknown method: ${method}`);
     }
   }
 
-  private handleNotification(notification: JsonRpcNotification): void {
-    switch (notification.method) {
-      case 'sessionUpdate': {
-        const params = notification.params as unknown as { update?: unknown };
-        if (params?.update) {
-          this.handleSessionUpdate(params.update);
-        }
-        break;
-      }
-      case 'message':
-        this.notifyMessageListeners({
-          type: 'text',
-          content: (notification.params as unknown as { content?: string })?.content || '',
-          messageId: (notification.params as unknown as { messageId?: string })?.messageId
-        });
-        break;
-      case 'message_delta':
-        this.notifyMessageListeners({
-          type: 'text_delta',
-          delta: (notification.params as unknown as { delta?: string })?.delta || '',
-          messageId: (notification.params as unknown as { messageId?: string })?.messageId || 'unknown'
-        });
-        break;
-      case 'streaming_start':
-        this.notifyMessageListeners({
-          type: 'streaming_start',
-          messageId: (notification.params as unknown as { messageId?: string })?.messageId || 'unknown'
-        });
-        break;
-      case 'streaming_end':
-        this.notifyMessageListeners({
-          type: 'streaming_end',
-          messageId: (notification.params as unknown as { messageId?: string })?.messageId || 'unknown'
-        });
-        break;
-      case 'tool_call': {
-        const toolParams = notification.params as unknown as { id?: string; tool?: string; params?: unknown };
-        const toolCall: ToolCall = {
-          id: toolParams?.id || `tool_${Date.now()}`,
-          tool: toolParams?.tool || 'unknown',
-          params: toolParams?.params || {},
-          status: 'running',
-          startTime: Date.now()
-        };
-        this.notifyToolCallListeners(toolCall);
-        break;
-      }
+  private async handleAgentNotification(method: string, params: unknown): Promise<void> {
+    if (method === ACP_METHODS.sessionUpdate) {
+      const notification = params as SessionNotification;
+      this.handleSessionUpdate(notification.update);
+    } else {
+      ErrorHandler.debug(`Unknown notification: ${method}`);
     }
   }
 
-  private handleSessionUpdate(update: unknown): void {
-    const u = update as { sessionUpdate?: string; content?: { text?: string }; toolCallId?: string; title?: string; rawInput?: unknown; status?: string };
-    switch (u.sessionUpdate) {
-      case 'agent_message_chunk':
-        if (u.content?.text) {
+  private handleSessionUpdate(update: SessionNotification['update']): void {
+    switch (update.sessionUpdate) {
+      case 'agent_message_chunk': {
+        const chunk = update as AgentMessageChunkUpdate;
+        if (chunk.content?.type === 'text' && chunk.content.text) {
           this.notifyMessageListeners({
             type: 'text_delta',
-            delta: u.content.text,
-            messageId: this.currentSessionId || 'unknown'
+            delta: chunk.content.text,
+            messageId: this.currentSessionId
           });
         }
         break;
+      }
+
       case 'user_message_chunk':
-        // User message update, usually from replay
+        // User message chunks are usually from replay, can ignore
         break;
+
       case 'tool_call': {
+        const tool = update as ToolCallUpdate;
         const toolCall: ToolCall = {
-          id: u.toolCallId || `tool_${Date.now()}`,
-          tool: u.title || 'unknown',
-          params: u.rawInput || {},
-          status: u.status === 'pending' ? 'pending' : 'running',
+          id: tool.toolCallId,
+          tool: tool.title,
+          params: tool.rawInput,
+          status: tool.status === 'pending' ? 'pending' : 'running',
           startTime: Date.now()
         };
         this.notifyToolCallListeners(toolCall);
+        this.notifyMessageListeners({
+          type: 'tool_call',
+          tool: tool.title,
+          params: tool.rawInput,
+          id: tool.toolCallId
+        });
         break;
       }
-      case 'tool_call_update':
-        // Tool call status update
+
+      case 'tool_call_update': {
+        const toolUpdate = update as ToolCallUpdateUpdate;
+        const toolCall: ToolCall = {
+          id: toolUpdate.toolCallId,
+          tool: toolUpdate.title || 'unknown',
+          params: toolUpdate.rawInput,
+          status: toolUpdate.status === 'completed' ? 'completed' : 
+                   toolUpdate.status === 'failed' ? 'error' : 'running',
+          startTime: Date.now(),
+          result: toolUpdate.rawOutput
+        };
+        this.notifyToolCallListeners(toolCall);
+        this.notifyMessageListeners({
+          type: 'tool_call_update',
+          toolCall
+        });
         break;
-      case 'plan':
-        // Plan/todo update
+      }
+
+      case 'available_commands_update': {
+        const commandsUpdate = update as AvailableCommandsUpdate;
+        this.sessionMetadata.commands = commandsUpdate.availableCommands;
         break;
+      }
+
+      case 'current_mode_update': {
+        const modeUpdate = update as CurrentModeUpdate;
+        if (this.sessionMetadata.modes) {
+          this.sessionMetadata.modes.currentModeId = modeUpdate.currentModeId;
+        }
+        break;
+      }
+
+      case 'plan': {
+        const planUpdate = update as PlanUpdate;
+        this.notifyMessageListeners({
+          type: 'plan',
+          plan: { entries: planUpdate.entries }
+        });
+        break;
+      }
+
+      case 'agent_thought_chunk': {
+        const thought = update as AgentThoughtChunkUpdate;
+        if (thought.content?.type === 'text' && thought.content.text) {
+          // Could expose this separately if needed
+        }
+        break;
+      }
     }
   }
 
-  async sendRequest(request: JsonRpcRequest): Promise<JsonRpcResponse> {
-    return new Promise((resolve, reject) => {
-      if (!this.acpProcess || this.acpProcess.killed) {
-        reject(new Error('ACP process not running'));
-        return;
-      }
+  private async sendRequest<T>(method: string, params: unknown): Promise<T> {
+    if (!this.transport) {
+      throw new Error('Transport not initialized');
+    }
+    const response = await this.transport.sendRequest(method, params);
+    if (response.error) {
+      throw new Error(response.error.message);
+    }
+    return response.result as T;
+  }
 
-      const timeout = setTimeout(() => {
-        this.pendingRequests.delete(request.id);
-        reject(new Error(`Request ${request.id} timed out`));
-      }, this.config.timeoutMs);
+  private async sendNotification(method: string, params: unknown): Promise<void> {
+    if (!this.transport) {
+      throw new Error('Transport not initialized');
+    }
+    await this.transport.sendNotification(method, params);
+  }
 
-      this.pendingRequests.set(request.id, { resolve, reject, timeout });
-
-      const message = JSON.stringify(request) + '\n';
-      this.acpProcess.stdin?.write(message, (error) => {
-        if (error) {
-          clearTimeout(timeout);
-          this.pendingRequests.delete(request.id);
-          reject(error);
-        }
-      });
-    });
+  async initialize(): Promise<InitializeResponse> {
+    const request: InitializeRequest = {
+      protocolVersion: 1,
+      clientCapabilities: {
+        fs: { readTextFile: true, writeTextFile: true },
+        terminal: true
+      },
+      clientInfo: { name: 'openspec-vscode', version: '2.0.0' }
+    };
+    return this.sendRequest<InitializeResponse>(ACP_METHODS.initialize, request);
   }
 
   async createSession(): Promise<string | undefined> {
@@ -487,31 +472,25 @@ export class AcpClient {
         throw new Error('No workspace folder');
       }
 
-      const response = await this.sendRequest({
-        jsonrpc: '2.0',
-        id: ++this.requestId,
-        method: 'session/new',
-        params: {
-          cwd: workspaceFolder.uri.fsPath,
-          mcpServers: []
-        }
+      const request: NewSessionRequest = {
+        cwd: workspaceFolder.uri.fsPath,
+        mcpServers: []
+      };
+
+      const response = await this.sendRequest<NewSessionResponse>(ACP_METHODS.sessionNew, request);
+
+      this.currentSessionId = response.sessionId;
+      this.sessionMetadata.modes = response.modes || null;
+      this.sessionMetadata.models = response.models || null;
+
+      this.notifyMessageListeners({
+        type: 'session_created',
+        sessionId: response.sessionId
       });
 
-      if (response.error) {
-        throw new Error(response.error.message);
-      }
+      this.notifySessionCreatedListeners(response.sessionId);
 
-      const result = response.result as { sessionId?: string } | undefined;
-      if (result?.sessionId) {
-        this.currentSessionId = result.sessionId;
-        this.notifyMessageListeners({
-          type: 'session_created',
-          sessionId: result.sessionId
-        });
-        return result.sessionId;
-      }
-
-      return undefined;
+      return response.sessionId;
     } catch (error) {
       ErrorHandler.handle(error as Error, 'creating ACP session', false);
       return undefined;
@@ -525,22 +504,18 @@ export class AcpClient {
         throw new Error('No workspace folder');
       }
 
-      const response = await this.sendRequest({
-        jsonrpc: '2.0',
-        id: ++this.requestId,
-        method: 'session/load',
-        params: {
-          sessionId,
-          cwd: workspaceFolder.uri.fsPath,
-          mcpServers: []
-        }
-      });
+      const request: LoadSessionRequest = {
+        sessionId,
+        cwd: workspaceFolder.uri.fsPath,
+        mcpServers: []
+      };
 
-      if (response.error) {
-        throw new Error(response.error.message);
-      }
+      const response = await this.sendRequest<LoadSessionResponse>(ACP_METHODS.sessionLoad, request);
 
       this.currentSessionId = sessionId;
+      this.sessionMetadata.modes = response.modes || null;
+      this.sessionMetadata.models = response.models || null;
+
       return true;
     } catch (error) {
       ErrorHandler.handle(error as Error, 'loading ACP session', false);
@@ -549,54 +524,39 @@ export class AcpClient {
   }
 
   async sendPrompt(sessionId: string, content: string): Promise<void> {
-    try {
-      const response = await this.sendRequest({
-        jsonrpc: '2.0',
-        id: ++this.requestId,
-        method: 'session/prompt',
-        params: {
-          sessionId,
-          prompt: [{
-            type: 'text',
-            text: content
-          }]
-        }
-      });
+    const request: PromptRequest = {
+      sessionId,
+      prompt: [{ type: 'text', text: content }]
+    };
 
-      if (response.error) {
-        throw new Error(response.error.message);
-      }
-    } catch (error) {
-      ErrorHandler.handle(error as Error, 'sending prompt to ACP', false);
-      throw error;
+    const response = await this.sendRequest<PromptResponse>(ACP_METHODS.sessionPrompt, request);
+
+    // Response comes via session/update notifications, so we just check for errors
+    if (response.stopReason === 'error') {
+      throw new Error('Prompt processing failed');
     }
   }
 
   async cancelSession(sessionId: string): Promise<void> {
-    try {
-      await this.sendRequest({
-        jsonrpc: '2.0',
-        id: ++this.requestId,
-        method: 'cancel',
-        params: { sessionId }
-      });
-    } catch (error) {
-      ErrorHandler.handle(error as Error, 'canceling ACP session', false);
+    const notification: CancelNotification = { sessionId };
+    await this.sendNotification(ACP_METHODS.sessionCancel, notification);
+  }
+
+  async setMode(sessionId: string, modeId: string): Promise<void> {
+    const request: SetSessionModeRequest = { sessionId, modeId };
+    await this.sendRequest<void>(ACP_METHODS.sessionSetMode, request);
+    
+    if (this.sessionMetadata.modes) {
+      this.sessionMetadata.modes.currentModeId = modeId;
     }
   }
 
-  async answerQuestion(questionId: string, answers: string[]): Promise<void> {
-    try {
-      // This is handled via prompt - send the answer as a user message
-      if (this.currentSessionId) {
-        await this.sendPrompt(
-          this.currentSessionId,
-          `Answer to question ${questionId}: ${answers.join(', ')}`
-        );
-      }
-    } catch (error) {
-      ErrorHandler.handle(error as Error, 'answering question via ACP', false);
-      throw error;
+  async setModel(sessionId: string, modelId: string): Promise<void> {
+    const request: SetSessionModelRequest = { sessionId, modelId };
+    await this.sendRequest<void>(ACP_METHODS.sessionSetModel, request);
+    
+    if (this.sessionMetadata.models) {
+      this.sessionMetadata.models.currentModelId = modelId;
     }
   }
 
@@ -611,11 +571,9 @@ export class AcpClient {
     if (!this.currentSessionId) {
       return undefined;
     }
-    
-    // Cancel the current session
+
     this.cancelSession(this.currentSessionId).catch(() => {});
-    
-    // Return a cancelled response
+
     return {
       messageId: this.currentSessionId,
       content: '[Streaming cancelled by user]'
@@ -624,8 +582,6 @@ export class AcpClient {
 
   async startPlanMode(): Promise<boolean> {
     try {
-      // In ACP, plan mode is just a regular session
-      // The agent will determine the mode based on context
       if (!this.currentSessionId) {
         const sessionId = await this.createSession();
         if (!sessionId) {
@@ -639,12 +595,80 @@ export class AcpClient {
     }
   }
 
+  async answerQuestion(questionId: string, answers: string[]): Promise<void> {
+    try {
+      if (this.currentSessionId) {
+        await this.sendPrompt(
+          this.currentSessionId,
+          `Answer to question ${questionId}: ${answers.join(', ')}`
+        );
+      }
+    } catch (error) {
+      ErrorHandler.handle(error as Error, 'answering question via ACP', false);
+      throw error;
+    }
+  }
+
+  async validateSession(acpSessionId: string): Promise<boolean> {
+    try {
+      if (!this.isClientConnected()) {
+        ErrorHandler.debug(`Cannot validate session ${acpSessionId}: ACP client not connected`);
+        return false;
+      }
+
+      // Try to load the session - if it succeeds, the session is valid
+      const loaded = await this.loadSession(acpSessionId);
+      return loaded;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      ErrorHandler.debug(`Error validating session ${acpSessionId}: ${errorMessage}`);
+      return false;
+    }
+  }
+
   setCurrentSessionId(sessionId: string): void {
     this.currentSessionId = sessionId;
   }
 
   getCurrentSessionId(): string | undefined {
     return this.currentSessionId;
+  }
+
+  getSessionMetadata() {
+    return { ...this.sessionMetadata };
+  }
+
+  // Client capability setters
+  setOnReadTextFile(handler: (params: ReadTextFileRequest) => Promise<ReadTextFileResponse>): void {
+    this.readTextFileHandler = handler;
+  }
+
+  setOnWriteTextFile(handler: (params: WriteTextFileRequest) => Promise<WriteTextFileResponse>): void {
+    this.writeTextFileHandler = handler;
+  }
+
+  setOnRequestPermission(handler: (params: RequestPermissionRequest) => Promise<RequestPermissionResponse>): void {
+    this.requestPermissionHandler = handler;
+  }
+
+  setOnCreateTerminal(handler: (params: CreateTerminalRequest) => Promise<CreateTerminalResponse>): void {
+    this.createTerminalHandler = handler;
+  }
+
+  setOnTerminalOutput(handler: (params: TerminalOutputRequest) => Promise<TerminalOutputResponse>): void {
+    this.terminalOutputHandler = handler;
+  }
+
+  setOnWaitForTerminalExit(handler: (params: WaitForTerminalExitRequest) => Promise<WaitForTerminalExitResponse>): void {
+    this.waitForTerminalExitHandler = handler;
+  }
+
+  setOnKillTerminal(handler: (params: KillTerminalCommandRequest) => Promise<KillTerminalCommandResponse>): void {
+    this.killTerminalHandler = handler;
+  }
+
+  setOnReleaseTerminal(handler: (params: ReleaseTerminalRequest) => Promise<ReleaseTerminalResponse>): void {
+    this.releaseTerminalHandler = handler;
   }
 
   onMessage(listener: (message: AcpMessage) => void): vscode.Disposable {
@@ -659,7 +683,6 @@ export class AcpClient {
 
   onConnectionChange(listener: (connected: boolean) => void): vscode.Disposable {
     this.connectionListeners.push(listener);
-    // Call immediately with current state
     listener(this.isClientConnected());
     return new vscode.Disposable(() => {
       const index = this.connectionListeners.indexOf(listener);
@@ -740,16 +763,6 @@ export class AcpClient {
     });
   }
 
-  private notifyQuestionToolListeners(question: QuestionToolRequest): void {
-    this.questionToolListeners.forEach(listener => {
-      try {
-        listener(question);
-      } catch (error) {
-        ErrorHandler.debug(`Error in question tool listener: ${error}`);
-      }
-    });
-  }
-
   private notifySessionCreatedListeners(sessionId: string, changeId?: string): void {
     this.sessionCreatedListeners.forEach(listener => {
       try {
@@ -775,6 +788,19 @@ export class AcpClient {
         ErrorHandler.debug(`Error in offline listener: ${error}`);
       }
     });
+  }
+
+  private scheduleReconnect(): void {
+    if (this.reconnectTimer) {
+      return;
+    }
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = undefined;
+      if (!this.isClientConnected()) {
+        ErrorHandler.debug('Attempting to reconnect ACP...');
+        this.connect().catch(() => {});
+      }
+    }, 5000);
   }
 
   clearSession(): void {
@@ -805,16 +831,15 @@ export class AcpClient {
       this.reconnectTimer = undefined;
     }
 
-    this.pendingRequests.forEach(request => {
-      clearTimeout(request.timeout);
-      request.reject(new Error('Client disposed'));
-    });
-    this.pendingRequests.clear();
+    this.transport?.dispose();
+    this.transport = undefined;
 
     if (this.acpProcess && !this.acpProcess.killed) {
       this.acpProcess.kill('SIGTERM');
     }
+    this.acpProcess = undefined;
 
+    this.isConnected = false;
     this.messageListeners = [];
     this.connectionListeners = [];
     this.toolCallListeners = [];

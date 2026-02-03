@@ -87,7 +87,19 @@ export class OpenSpecExplorerProvider implements vscode.TreeDataProvider<TreeIte
       }
 
       return Promise.resolve([]);
+    }).catch(error => {
+      ErrorHandler.handle(error as Error, 'ExplorerProvider.getChildren');
+      return [this.getErrorItem()];
     });
+  }
+
+  private getErrorItem(): TreeItemData {
+    return {
+      id: 'error',
+      label: 'Error loading OpenSpec data',
+      type: 'welcome',
+      contextValue: 'welcome'
+    };
   }
 
   private getWelcomeItem(): TreeItemData {

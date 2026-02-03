@@ -4,6 +4,7 @@ import { WorkspaceUtils } from '../utils/workspace';
 import { SessionManager } from '../services/sessionManager';
 import { AcpClient } from '../services/acpClient';
 import { PortManager } from '../services/portManager';
+import { AcpClientCapabilities } from '../services/acpClientCapabilities';
 
 export interface ChatMessage {
   id: string;
@@ -60,13 +61,29 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private _acpClient: AcpClient;
   private _sessionManager: SessionManager;
 
+  private _capabilities: AcpClientCapabilities;
+
   constructor(extensionUri: vscode.Uri) {
     this._extensionUri = extensionUri;
     this._session = this._createNewSession();
     this._acpClient = AcpClient.getInstance();
     this._sessionManager = SessionManager.getInstance();
+    this._capabilities = new AcpClientCapabilities();
     
     this._setupAcpListeners();
+    this._setupAcpCapabilities();
+  }
+
+  private _setupAcpCapabilities(): void {
+    // Register client capabilities with ACP client
+    this._acpClient.setOnReadTextFile(params => this._capabilities.readTextFile(params));
+    this._acpClient.setOnWriteTextFile(params => this._capabilities.writeTextFile(params));
+    this._acpClient.setOnRequestPermission(params => this._capabilities.requestPermission(params));
+    this._acpClient.setOnCreateTerminal(params => this._capabilities.createTerminal(params));
+    this._acpClient.setOnTerminalOutput(params => this._capabilities.terminalOutput(params));
+    this._acpClient.setOnWaitForTerminalExit(params => this._capabilities.waitForTerminalExit(params));
+    this._acpClient.setOnKillTerminal(params => this._capabilities.killTerminal(params));
+    this._acpClient.setOnReleaseTerminal(params => this._capabilities.releaseTerminal(params));
   }
 
   public resolveWebviewView(
@@ -678,6 +695,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   public dispose(): void {
     this._disposables.forEach(d => d.dispose());
     this._disposables = [];
+    this._capabilities.dispose();
   }
 
   private _getHtmlContent(webview: vscode.Webview): string {
