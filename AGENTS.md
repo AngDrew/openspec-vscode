@@ -196,6 +196,24 @@ Usage notes:
 <location>global</location>
 </skill>
 
+<skill>
+<name>librarian</name>
+<description>Multi-repository codebase exploration. Research library internals, find code patterns, understand architecture, compare implementations across GitHub/npm/PyPI/crates. Use when needing deep understanding of how libraries work, finding implementations across open source, or exploring remote repository structure.</description>
+<location>global</location>
+</skill>
+
+<skill>
+<name>vscode-extension-expert</name>
+<description>This skill provides expert-level guidance for VS Code extension development. Use when implementing new extension features, debugging extension code, designing WebView UIs, implementing Language Server Protocol features, or optimizing extension performance. Covers activation events, contribution points, VS Code API patterns, security best practices, testing strategies, and publishing workflows.</description>
+<location>global</location>
+</skill>
+
+<skill>
+<name>vscode-extension-refactorer</name>
+<description>This skill provides expert-level guidance for refactoring VS Code extension code. Use when extracting classes or functions, reducing code duplication, improving type safety, reorganizing module structure, applying design patterns, or optimizing performance. Covers systematic refactoring workflows, code smell detection, safe transformation techniques, and VS Code-specific patterns.</description>
+<location>global</location>
+</skill>
+
 </available_skills>
 <!-- SKILLS_TABLE_END -->
 

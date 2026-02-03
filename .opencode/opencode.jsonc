@@ -1,5 +1,5 @@
-// {
-//   "$schema": "https://opencode.ai/config.json",
+{
+  "$schema": "https://opencode.ai/config.json",
 //   "agent": {
 //     "build": {
 //       "model": "opencode/kimi-k2.5-free"
@@ -8,4 +8,4 @@
 //       "model": "opencode/kimi-k2.5-free"
 //     }
 //   },
-// }
+}
