@@ -685,7 +685,11 @@ export class AcpClient {
     if (method === ACP_METHODS.sessionUpdate) {
       const notification = params as SessionNotification;
       this.handleSessionUpdate(notification.update);
-    } else {
+      return;
+    }
+
+    const handled = this.handleNotification({ jsonrpc: '2.0', method, params });
+    if (!handled) {
       ErrorHandler.debug(`Unknown notification: ${method}`);
     }
   }
@@ -1278,7 +1282,7 @@ export class AcpClient {
     });
   }
 
-  private handleNotification(notification: { jsonrpc: '2.0'; method: string; params?: unknown }): void {
+  private handleNotification(notification: { jsonrpc: '2.0'; method: string; params?: unknown }): boolean {
     const { method, params } = notification;
 
     switch (method) {
@@ -1292,7 +1296,7 @@ export class AcpClient {
             messageId: message.messageId
           });
         }
-        break;
+        return true;
       }
       case 'message_delta': {
         const message = params as { delta?: string; messageId?: string } | undefined;
@@ -1304,7 +1308,7 @@ export class AcpClient {
             messageId: message.messageId
           });
         }
-        break;
+        return true;
       }
       case 'streaming_start': {
         const message = params as { messageId?: string } | undefined;
@@ -1313,13 +1317,13 @@ export class AcpClient {
         }
         this.currentResponseBuffer = '';
         this.notifyMessageListeners({ type: 'streaming_start', messageId: message?.messageId });
-        break;
+        return true;
       }
       case 'streaming_end': {
         const message = params as { messageId?: string } | undefined;
         this.activeStreamMessageId = undefined;
         this.notifyMessageListeners({ type: 'streaming_end', messageId: message?.messageId });
-        break;
+        return true;
       }
       case 'tool_call': {
         const tool = params as { tool?: string; id?: string; params?: unknown } | undefined;
@@ -1332,12 +1336,12 @@ export class AcpClient {
         };
         this.activeToolCalls.set(toolCall.id, toolCall);
         this.notifyToolCallListeners(toolCall);
-        break;
+        return true;
       }
       case 'tool_result': {
         const tool = params as { id?: string; result?: unknown; error?: string; tool?: string } | undefined;
         if (!tool?.id) {
-          break;
+          return true;
         }
         const existing = this.activeToolCalls.get(tool.id);
         const updated: ToolCall = {
@@ -1352,15 +1356,15 @@ export class AcpClient {
         };
         this.activeToolCalls.set(updated.id, updated);
         this.notifyToolCallListeners(updated);
-        break;
+        return true;
       }
       case 'status': {
         const status = params as { status?: string } | undefined;
         this.notifyMessageListeners({ type: 'status', status: status?.status });
-        break;
+        return true;
       }
       default:
-        break;
+        return false;
     }
   }
 

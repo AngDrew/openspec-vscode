@@ -157,45 +157,78 @@ export class AcpTransport {
   }
 
   private handleLine(line: string): void {
-    try {
-      const message = JSON.parse(line);
-      
-      // Check if it's a response to a pending request
-      if (message.id !== undefined && this.pendingRequests.has(message.id)) {
-        const request = this.pendingRequests.get(message.id);
-        if (request) {
-          if (request.timeout) {
-            clearTimeout(request.timeout);
-          }
-          this.pendingRequests.delete(message.id);
-          
-          if (message.error) {
-            request.reject(new Error(message.error.message || 'Unknown error'));
-          } else {
-            request.resolve(message as JsonRpcResponse);
-          }
-        }
-        return;
-      }
-
-      // Check if it's a request from the agent
-      if (message.method && message.id !== undefined) {
-        this.handleAgentRequest(message as JsonRpcRequest);
-        return;
-      }
-
-      // Handle notifications from the agent
-      if (message.method && message.id === undefined) {
-        this.handleAgentNotification(message as JsonRpcNotification);
-        return;
-      }
-
-      // Unknown message type
-      ErrorHandler.debug(`[ACP] Unknown message: ${line.substring(0, 200)}`);
-    } catch (error) {
+    const message = this.tryParseJson(line);
+    if (!message || typeof message !== 'object') {
       // Not valid JSON, might be log output
       ErrorHandler.debug(`[ACP] Non-JSON output: ${line.substring(0, 200)}`);
+      return;
     }
+
+    const rpcMessage = message as Partial<JsonRpcRequest & JsonRpcResponse & JsonRpcNotification>;
+
+    // Check if it's a response to a pending request
+    if (rpcMessage.id !== undefined && this.pendingRequests.has(rpcMessage.id)) {
+      const request = this.pendingRequests.get(rpcMessage.id);
+      if (request) {
+        if (request.timeout) {
+          clearTimeout(request.timeout);
+        }
+        this.pendingRequests.delete(rpcMessage.id);
+        
+        if (rpcMessage.error) {
+          request.reject(new Error(rpcMessage.error.message || 'Unknown error'));
+        } else {
+          request.resolve(rpcMessage as JsonRpcResponse);
+        }
+      }
+      return;
+    }
+
+    // Check if it's a request from the agent
+    if (rpcMessage.method && rpcMessage.id !== undefined) {
+      this.handleAgentRequest(rpcMessage as JsonRpcRequest);
+      return;
+    }
+
+    // Handle notifications from the agent
+    if (rpcMessage.method && rpcMessage.id === undefined) {
+      this.handleAgentNotification(rpcMessage as JsonRpcNotification);
+      return;
+    }
+
+    // Unknown message type
+    ErrorHandler.debug(`[ACP] Unknown message: ${line.substring(0, 200)}`);
+  }
+
+  private tryParseJson(line: string): unknown | undefined {
+    const trimmed = line.trim();
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      // continue
+    }
+
+    if (trimmed.startsWith('data:')) {
+      const candidate = trimmed.slice(5).trim();
+      try {
+        return JSON.parse(candidate);
+      } catch {
+        // continue
+      }
+    }
+
+    const jsonStart = trimmed.indexOf('{');
+    const jsonEnd = trimmed.lastIndexOf('}');
+    if (jsonStart >= 0 && jsonEnd > jsonStart) {
+      const candidate = trimmed.slice(jsonStart, jsonEnd + 1);
+      try {
+        return JSON.parse(candidate);
+      } catch {
+        // ignore
+      }
+    }
+
+    return undefined;
   }
 
   private async handleAgentRequest(request: JsonRpcRequest): Promise<void> {
