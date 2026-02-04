@@ -806,21 +806,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             </div>
             <button class="clear-button" id="clearBtn" title="Start a new chat">New Chat</button>
           </div>
-          <div class="selectors-bar" id="selectorsBar">
-            <div class="selector-group">
-              <label class="selector-label">Mode:</label>
-              <div id="modeSelectorContainer" class="mode-selector-container">
-                <!-- Mode selector will be dynamically inserted here (toggle for 2, dropdown for more) -->
-              </div>
-            </div>
-            <div class="selector-group">
-              <label class="selector-label">Model:</label>
-              <button id="modelSelectorBtn" class="model-selector-btn" title="Select model" style="display: none;">
-                <span id="currentModelLabel">Select Model</span>
-                <span class="model-selector-arrow">▼</span>
-              </button>
-            </div>
-          </div>
           <!-- Model Selection Dialog -->
           <div id="modelDialog" class="model-dialog" style="display: none;">
             <div class="model-dialog-overlay"></div>
@@ -849,6 +834,21 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
               <span></span>
             </div>
             <span class="typing-text" id="typingText">AI is thinking...</span>
+          </div>
+          <div class="selectors-bar" id="selectorsBar">
+            <div class="selector-group">
+              <label class="selector-label">Mode:</label>
+              <div id="modeSelectorContainer" class="mode-selector-container">
+                <!-- Mode selector will be dynamically inserted here (toggle for 2, dropdown for more) -->
+              </div>
+            </div>
+            <div class="selector-group">
+              <label class="selector-label">Model:</label>
+              <button id="modelSelectorBtn" class="model-selector-btn" title="Select model" style="display: none;">
+                <span id="currentModelLabel">Select Model</span>
+                <span class="model-selector-arrow">▼</span>
+              </button>
+            </div>
           </div>
           <div class="input-container">
             <textarea
