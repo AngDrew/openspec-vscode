@@ -180,11 +180,35 @@ export class AcpClient {
   }
 
   private resolveDefaultOpencodeConfigPath(): string | undefined {
-    const configDir = path.join(os.homedir(), '.config', 'opencode');
-    const candidates = [
-      path.join(configDir, 'opencode.json'),
-      path.join(configDir, 'opencode.jsonc')
-    ];
+    const home = os.homedir();
+    const roots: Array<string | undefined> = process.platform === 'win32'
+      ? [
+        process.env.XDG_CONFIG_HOME,
+        process.env.APPDATA,
+        process.env.LOCALAPPDATA,
+        process.env.USERPROFILE ? path.join(process.env.USERPROFILE, '.config') : undefined,
+        path.join(home, 'AppData', 'Roaming'),
+        path.join(home, 'AppData', 'Local'),
+        path.join(home, '.config')
+      ]
+      : [
+        process.env.XDG_CONFIG_HOME,
+        path.join(home, '.config')
+      ];
+    const seen = new Set<string>();
+    const candidates: string[] = [];
+
+    for (const root of roots) {
+      if (!root || seen.has(root)) {
+        continue;
+      }
+      seen.add(root);
+      const configDir = path.join(root, 'opencode');
+      candidates.push(
+        path.join(configDir, 'opencode.jsonc'),
+        path.join(configDir, 'opencode.json')
+      );
+    }
 
     for (const candidate of candidates) {
       try {
@@ -202,16 +226,178 @@ export class AcpClient {
   private buildOpencodeEnv(): NodeJS.ProcessEnv {
     const env = { ...process.env };
 
-    if (env.OPENCODE_CONFIG || env.OPENCODE_CONFIG_DIR || env.OPENCODE_CONFIG_CONTENT) {
+    if (env.OPENCODE_CONFIG_CONTENT) {
+      return env;
+    }
+
+    if (env.OPENCODE_CONFIG || env.OPENCODE_CONFIG_DIR) {
       return env;
     }
 
     const defaultConfigPath = this.resolveDefaultOpencodeConfigPath();
     if (defaultConfigPath) {
+      const raw = this.tryReadConfigFile(defaultConfigPath);
+      if (raw && this.isInlineConfigSafe(raw)) {
+        const content = this.tryBuildConfigContent(raw);
+        if (content) {
+          env.OPENCODE_CONFIG_CONTENT = content;
+          ErrorHandler.debug(`Using OPENCODE_CONFIG_CONTENT from ${defaultConfigPath}`);
+          return env;
+        }
+      }
+
       env.OPENCODE_CONFIG = defaultConfigPath;
+      ErrorHandler.debug(`Using OPENCODE_CONFIG at ${defaultConfigPath}`);
     }
 
     return env;
+  }
+
+  private tryReadConfigFile(filePath: string): string | undefined {
+    try {
+      const raw = fs.readFileSync(filePath, 'utf8');
+      return raw.trim().length ? raw : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private isInlineConfigSafe(raw: string): boolean {
+    return !/\{(env|file):/i.test(raw);
+  }
+
+  private tryBuildConfigContent(raw: string): string | undefined {
+    try {
+      const parsed = JSON.parse(raw);
+      return JSON.stringify(parsed);
+    } catch {
+      try {
+        const stripped = this.stripJsonComments(raw);
+        const parsed = JSON.parse(stripped);
+        return JSON.stringify(parsed);
+      } catch {
+        return undefined;
+      }
+    }
+  }
+
+  private stripJsonComments(input: string): string {
+    let output = '';
+    let inString = false;
+    let stringChar = '';
+    let escaped = false;
+    let inLineComment = false;
+    let inBlockComment = false;
+
+    for (let i = 0; i < input.length; i++) {
+      const char = input[i];
+      const next = i + 1 < input.length ? input[i + 1] : '';
+
+      if (inLineComment) {
+        if (char === '\n') {
+          inLineComment = false;
+          output += char;
+        }
+        continue;
+      }
+
+      if (inBlockComment) {
+        if (char === '*' && next === '/') {
+          inBlockComment = false;
+          i++;
+        }
+        continue;
+      }
+
+      if (inString) {
+        output += char;
+        if (escaped) {
+          escaped = false;
+          continue;
+        }
+        if (char === '\\') {
+          escaped = true;
+          continue;
+        }
+        if (char === stringChar) {
+          inString = false;
+          stringChar = '';
+        }
+        continue;
+      }
+
+      if ((char === '"' || char === '\'') && !inString) {
+        inString = true;
+        stringChar = char;
+        output += char;
+        continue;
+      }
+
+      if (char === '/' && next === '/') {
+        inLineComment = true;
+        i++;
+        continue;
+      }
+
+      if (char === '/' && next === '*') {
+        inBlockComment = true;
+        i++;
+        continue;
+      }
+
+      output += char;
+    }
+
+    return output;
+  }
+
+  private resolveNodeEntrypoint(opencodePath: string): string | undefined {
+    if (process.platform !== 'win32') {
+      return undefined;
+    }
+
+    const ext = path.extname(opencodePath).toLowerCase();
+    if (ext !== '.cmd' && ext !== '.bat') {
+      return undefined;
+    }
+
+    const fromShim = this.resolveNodeEntrypointFromShim(opencodePath);
+    if (fromShim && fs.existsSync(fromShim)) {
+      return fromShim;
+    }
+
+    const npmDir = path.dirname(opencodePath);
+    const fallback = path.resolve(npmDir, '..', 'node_modules', 'opencode-ai', 'bin', 'opencode');
+    if (fs.existsSync(fallback)) {
+      return fallback;
+    }
+
+    return undefined;
+  }
+
+  private resolveNodeEntrypointFromShim(shimPath: string): string | undefined {
+    try {
+      const raw = fs.readFileSync(shimPath, 'utf8');
+      const matches = Array.from(
+        raw.matchAll(/"([^"]*opencode-ai[\\/]+bin[\\/]opencode(?:\.[a-z]+)?)"/gi)
+      );
+      if (!matches.length) {
+        return undefined;
+      }
+
+      const baseDir = path.dirname(shimPath) + path.sep;
+      const candidate = matches
+        .map((match) => match[1])
+        .sort((a, b) => b.length - a.length)[0];
+
+      const resolved = candidate
+        .replace(/%~dp0/gi, baseDir)
+        .replace(/%dp0/gi, baseDir);
+
+      return path.resolve(resolved);
+    } catch {
+      return undefined;
+    }
   }
 
   static getInstance(): AcpClient {
@@ -351,17 +537,13 @@ export class AcpClient {
     let args = baseArgs;
     let shell = false;
     if (process.platform === 'win32') {
-      const ext = path.extname(opencodePath).toLowerCase();
-      if (ext === '.cmd' || ext === '.bat') {
-        const npmDir = path.dirname(opencodePath);
-        const nodeEntrypoint = path.join(npmDir, 'node_modules', 'opencode-ai', 'bin', 'opencode');
-        if (fs.existsSync(nodeEntrypoint)) {
-          command = process.execPath;
-          args = [nodeEntrypoint, ...baseArgs];
-        } else {
-          // Fallback: let the OS shell resolve/execute the shim.
-          shell = true;
-        }
+      const nodeEntrypoint = this.resolveNodeEntrypoint(opencodePath);
+      if (nodeEntrypoint) {
+        command = process.execPath;
+        args = [nodeEntrypoint, ...baseArgs];
+      } else if (['.cmd', '.bat'].includes(path.extname(opencodePath).toLowerCase())) {
+        // Fallback: let the OS shell resolve/execute the shim.
+        shell = true;
       }
     }
 
@@ -373,7 +555,8 @@ export class AcpClient {
       cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
       shell,
-      env
+      env,
+      windowsHide: process.platform === 'win32'
     });
 
     // Wait until the process is actually spawned, otherwise we'll race with setup.

@@ -210,7 +210,8 @@ export class AcpClientCapabilities {
       const proc = spawn(params.command, params.args || [], {
         cwd,
         env: envVars,
-        shell: true
+        shell: true,
+        windowsHide: process.platform === 'win32'
       });
 
       managedTerminal.proc = proc;
