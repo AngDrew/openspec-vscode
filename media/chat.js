@@ -10,8 +10,6 @@
   const typingIndicator = document.getElementById('typingIndicator');
   const cancelBtn = document.getElementById('cancelBtn');
   const connectionStatus = document.getElementById('connectionStatus');
-  const phaseTracker = document.getElementById('phaseTracker');
-  const phaseTrackerContainer = document.getElementById('phaseTrackerContainer');
   const connectionErrorBanner = document.getElementById('connectionErrorBanner');
   const connectionErrorMessage = document.getElementById('connectionErrorMessage');
   const connectionErrorRetryBtn = document.getElementById('connectionErrorRetryBtn');
@@ -21,13 +19,26 @@
   const offlineIndicatorCount = document.getElementById('offlineIndicatorCount');
   const offlineIndicatorCloseBtn = document.getElementById('offlineIndicatorCloseBtn');
 
+  // Selector Elements
+  const selectorsBar = document.getElementById('selectorsBar');
+  const modeSelectorContainer = document.getElementById('modeSelectorContainer');
+  const modelSelectorBtn = document.getElementById('modelSelectorBtn');
+  const currentModelLabel = document.getElementById('currentModelLabel');
+  const modelDialog = document.getElementById('modelDialog');
+  const modelDialogClose = document.getElementById('modelDialogClose');
+  const modelSearchInput = document.getElementById('modelSearchInput');
+  const modelDialogList = document.getElementById('modelDialogList');
+
   // State
   let messages = [];
+  let availableModes = [];
+  let availableModels = [];
+  let currentModeId = '';
+  let currentModelId = '';
+  let filteredModels = [];
   let isUserScrolling = false;
   let scrollTimeout = null;
   let isStreaming = false;
-  let currentPhases = [];
-  let currentPhaseId = null;
 
   // Throttling state for performance optimization
   let pendingUpdate = null;
@@ -101,48 +112,6 @@
     // Track user scrolling to prevent auto-scroll when user is reading history
     messagesContainer.addEventListener('scroll', handleScroll);
 
-    // Phase tracker click handlers
-    if (phaseTrackerContainer) {
-      const phaseItems = phaseTrackerContainer.querySelectorAll('.phase-item');
-      phaseItems.forEach(item => {
-        item.addEventListener('click', () => {
-          const phaseId = item.getAttribute('data-phase');
-          if (phaseId) {
-            vscode.postMessage({
-              type: 'phaseClicked',
-              phaseId: phaseId
-            });
-          }
-        });
-      });
-    }
-
-    // Action buttons click handlers
-    const actionButtons = document.getElementById('actionButtons');
-    if (actionButtons) {
-      const actionBtns = actionButtons.querySelectorAll('.action-btn');
-      actionBtns.forEach(btn => {
-        btn.addEventListener('click', () => {
-          const action = btn.getAttribute('data-action');
-          if (action) {
-            switch (action) {
-              case 'newChange':
-                vscode.postMessage({ type: 'newChange' });
-                break;
-              case 'fastForward':
-                vscode.postMessage({ type: 'fastForward' });
-                break;
-              case 'apply':
-                vscode.postMessage({ type: 'apply' });
-                break;
-              case 'archive':
-                vscode.postMessage({ type: 'archive' });
-                break;
-            }
-          }
-        });
-      });
-    }
 
     // Connection error banner handlers
     if (connectionErrorRetryBtn) {
@@ -150,6 +119,267 @@
     }
     if (connectionErrorCloseBtn) {
       connectionErrorCloseBtn.addEventListener('click', hideConnectionError);
+    }
+
+    // Selector event handlers
+    if (modelSelectorBtn) {
+      modelSelectorBtn.addEventListener('click', openModelDialog);
+    }
+    if (modelDialogClose) {
+      modelDialogClose.addEventListener('click', closeModelDialog);
+    }
+    if (modelDialog) {
+      modelDialog.querySelector('.model-dialog-overlay').addEventListener('click', closeModelDialog);
+    }
+    if (modelSearchInput) {
+      modelSearchInput.addEventListener('input', handleModelSearch);
+      modelSearchInput.addEventListener('keydown', handleModelDialogKeydown);
+    }
+  }
+
+  // ========================================
+  // Mode Selector Functions
+  // ========================================
+
+  function renderModeSelector() {
+    if (!modeSelectorContainer || availableModes.length === 0) {
+      if (modeSelectorContainer) {
+        modeSelectorContainer.innerHTML = '';
+      }
+      return;
+    }
+
+    modeSelectorContainer.innerHTML = '';
+
+    if (availableModes.length === 2) {
+      // Render as toggle for 2 modes
+      const toggle = document.createElement('div');
+      toggle.className = 'mode-toggle';
+
+      availableModes.forEach(mode => {
+        const btn = document.createElement('button');
+        btn.className = 'mode-toggle-btn';
+        btn.textContent = mode.name || mode.id;
+        if (mode.id === currentModeId) {
+          btn.classList.add('active');
+        }
+        btn.addEventListener('click', () => {
+          selectMode(mode.id);
+        });
+        toggle.appendChild(btn);
+      });
+
+      modeSelectorContainer.appendChild(toggle);
+    } else {
+      // Render as dropdown for 3+ modes
+      const select = document.createElement('select');
+      select.className = 'mode-selector';
+
+      availableModes.forEach(mode => {
+        const option = document.createElement('option');
+        option.value = mode.id;
+        option.textContent = mode.name || mode.id;
+        if (mode.id === currentModeId) {
+          option.selected = true;
+        }
+        select.appendChild(option);
+      });
+
+      select.addEventListener('change', (e) => {
+        selectMode(e.target.value);
+      });
+
+      modeSelectorContainer.appendChild(select);
+    }
+  }
+
+  function selectMode(modeId) {
+    if (modeId === currentModeId) return;
+    currentModeId = modeId;
+    renderModeSelector();
+    vscode.postMessage({
+      type: 'selectMode',
+      modeId: modeId
+    });
+  }
+
+  // ========================================
+  // Model Selector Functions
+  // ========================================
+
+  function updateModelButton() {
+    if (!modelSelectorBtn || !currentModelLabel) return;
+
+    const currentModel = availableModels.find(m => m.modelId === currentModelId);
+    if (currentModel) {
+      currentModelLabel.textContent = currentModel.name || currentModel.modelId;
+      modelSelectorBtn.style.display = 'flex';
+    } else if (availableModels.length > 0) {
+      modelSelectorBtn.style.display = 'flex';
+      currentModelLabel.textContent = 'Select Model';
+    } else {
+      modelSelectorBtn.style.display = 'none';
+    }
+  }
+
+  function openModelDialog() {
+    if (!modelDialog || !modelSearchInput || !modelDialogList) return;
+
+    filteredModels = [...availableModels];
+    renderModelList();
+
+    modelDialog.style.display = 'flex';
+    modelSearchInput.value = '';
+    modelSearchInput.focus();
+
+    // Select current model in the list
+    highlightSelectedModel();
+  }
+
+  function closeModelDialog() {
+    if (modelDialog) {
+      modelDialog.style.display = 'none';
+    }
+    if (messageInput) {
+      messageInput.focus();
+    }
+  }
+
+  function renderModelList() {
+    if (!modelDialogList) return;
+
+    modelDialogList.innerHTML = '';
+
+    if (filteredModels.length === 0) {
+      const emptyMsg = document.createElement('div');
+      emptyMsg.className = 'model-dialog-empty';
+      emptyMsg.textContent = 'No models found';
+      modelDialogList.appendChild(emptyMsg);
+      return;
+    }
+
+    filteredModels.forEach((model, index) => {
+      const item = document.createElement('div');
+      item.className = 'model-dialog-item';
+      item.dataset.index = index;
+      item.dataset.modelId = model.modelId;
+
+      if (model.modelId === currentModelId) {
+        item.classList.add('selected');
+      }
+
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'model-dialog-item-name';
+      nameSpan.textContent = model.name || model.modelId;
+
+      const idSpan = document.createElement('span');
+      idSpan.className = 'model-dialog-item-id';
+      idSpan.textContent = model.modelId;
+
+      const checkSpan = document.createElement('span');
+      checkSpan.className = 'model-dialog-item-check';
+      checkSpan.textContent = '✓';
+
+      item.appendChild(nameSpan);
+      item.appendChild(idSpan);
+      item.appendChild(checkSpan);
+
+      item.addEventListener('click', () => {
+        selectModel(model.modelId);
+      });
+
+      modelDialogList.appendChild(item);
+    });
+  }
+
+  function handleModelSearch(e) {
+    const query = e.target.value.toLowerCase().trim();
+
+    if (!query) {
+      filteredModels = [...availableModels];
+    } else {
+      filteredModels = availableModels.filter(model => {
+        const name = (model.name || '').toLowerCase();
+        const id = (model.modelId || '').toLowerCase();
+        return name.includes(query) || id.includes(query);
+      });
+    }
+
+    renderModelList();
+  }
+
+  function handleModelDialogKeydown(e) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeModelDialog();
+    } else if (e.key === 'Enter' && filteredModels.length > 0) {
+      e.preventDefault();
+      // Select the first filtered model
+      selectModel(filteredModels[0].modelId);
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      navigateModelList(e.key === 'ArrowDown' ? 1 : -1);
+    }
+  }
+
+  function navigateModelList(direction) {
+    const items = modelDialogList.querySelectorAll('.model-dialog-item');
+    if (items.length === 0) return;
+
+    const currentIndex = Array.from(items).findIndex(item =>
+      item.classList.contains('selected')
+    );
+
+    let newIndex = currentIndex + direction;
+    if (newIndex < 0) newIndex = items.length - 1;
+    if (newIndex >= items.length) newIndex = 0;
+
+    items.forEach(item => item.classList.remove('selected'));
+    items[newIndex].classList.add('selected');
+
+    // Scroll into view
+    items[newIndex].scrollIntoView({ block: 'nearest' });
+  }
+
+  function highlightSelectedModel() {
+    const items = modelDialogList.querySelectorAll('.model-dialog-item');
+    items.forEach(item => {
+      if (item.dataset.modelId === currentModelId) {
+        item.classList.add('selected');
+        item.scrollIntoView({ block: 'nearest' });
+      } else {
+        item.classList.remove('selected');
+      }
+    });
+  }
+
+  function selectModel(modelId) {
+    if (modelId === currentModelId) {
+      closeModelDialog();
+      return;
+    }
+
+    currentModelId = modelId;
+    updateModelButton();
+    closeModelDialog();
+
+    vscode.postMessage({
+      type: 'selectModel',
+      modelId: modelId
+    });
+  }
+
+  function updateSelectors(modes, models) {
+    if (modes) {
+      availableModes = modes.availableModes || [];
+      currentModeId = modes.currentModeId || '';
+      renderModeSelector();
+    }
+
+    if (models) {
+      availableModels = models.availableModels || [];
+      currentModelId = models.currentModelId || '';
+      updateModelButton();
     }
   }
 
@@ -247,60 +477,12 @@
   }
 
   // Update phase tracker with new phase data
-  function updatePhaseTracker(phases) {
-    if (!phases || !Array.isArray(phases)) {
-      return;
-    }
-
-    currentPhases = phases;
-
-    if (!phaseTrackerContainer) {
-      return;
-    }
-
-    phases.forEach(phase => {
-      const phaseEl = phaseTrackerContainer.querySelector(`[data-phase="${phase.id}"]`);
-      if (phaseEl) {
-        phaseEl.setAttribute('data-status', phase.status);
-      }
-    });
+  function updatePhaseTracker(_phases) {
+    return;
   }
 
-  // Set the current active phase
-  function setCurrentPhase(phaseId) {
-    currentPhaseId = phaseId;
-
-    if (!phaseTrackerContainer) {
-      return;
-    }
-
-    // Reset all phases to pending first
-    const allPhases = phaseTrackerContainer.querySelectorAll('.phase-item');
-    allPhases.forEach(phaseEl => {
-      phaseEl.setAttribute('data-status', 'pending');
-    });
-
-    // Update phases based on current phase
-    const phaseOrder = ['new', 'drafting', 'implementation'];
-    const currentIndex = phaseOrder.indexOf(phaseId);
-
-    if (currentIndex === -1) {
-      return;
-    }
-
-    // Mark previous phases as completed
-    for (let i = 0; i < currentIndex; i++) {
-      const phaseEl = phaseTrackerContainer.querySelector(`[data-phase="${phaseOrder[i]}"]`);
-      if (phaseEl) {
-        phaseEl.setAttribute('data-status', 'completed');
-      }
-    }
-
-    // Mark current phase as active
-    const currentPhaseEl = phaseTrackerContainer.querySelector(`[data-phase="${phaseId}"]`);
-    if (currentPhaseEl) {
-      currentPhaseEl.setAttribute('data-status', 'active');
-    }
+  function setCurrentPhase(_phaseId) {
+    return;
   }
 
   // Handle scroll events to detect user scrolling
@@ -379,14 +561,23 @@
           markMessageAsPartial(message.messageId, message.partialContent);
         }
         break;
-      case 'updatePhaseTracker':
-        updatePhaseTracker(message.phases);
-        break;
-      case 'setCurrentPhase':
-        setCurrentPhase(message.phaseId);
-        break;
       case 'displayArtifact':
         displayArtifact(message.artifact);
+        break;
+      case 'sessionMetadata':
+        updateSelectors(message.modes, message.models);
+        break;
+      case 'modeUpdate':
+        if (message.modeId) {
+          currentModeId = message.modeId;
+          renderModeSelector();
+        }
+        break;
+      case 'modelUpdate':
+        if (message.modelId) {
+          currentModelId = message.modelId;
+          updateModelButton();
+        }
         break;
       case 'connectionState':
         updateConnectionStatus(message.state, message.port);

@@ -21,8 +21,6 @@
   "activationEvents": [
     "onStartupFinished",
     "onCommand:openspec.chat.open",
-    "onView:openspecExplorer",
-    "onView:openspecWelcome",
     "onView:openspecChat"
   ],
   "main": "./out/extension.js",
@@ -39,85 +37,14 @@
     "views": {
       "openspec": [
         {
-          "id": "openspecExplorer",
-          "name": "OpenSpec Explorer",
-          "when": "openspec:initialized"
-        },
-        {
-          "id": "openspecWelcome",
-          "name": "OpenSpec",
-          "when": "!openspec:initialized"
-        },
-        {
           "id": "openspecChat",
           "name": "OpenSpec Chat",
           "type": "webview",
-          "when": "openspec:initialized && openspec:chatEnabled"
+          "when": "openspec:chatEnabled"
         }
       ]
     },
-    "viewsWelcome": [
-      {
-        "view": "openspecWelcome",
-        "contents": "OpenSpec workspace not detected\n[Initialize OpenSpec](command:openspec.init)\n\nLearn more about [OpenSpec](https://github.com/sst/opencode)",
-        "when": "!openspec:initialized"
-      }
-    ],
     "commands": [
-      {
-        "command": "openspec.viewDetails",
-        "title": "OpenSpec: View Details",
-        "icon": "$(search)"
-      },
-      {
-        "command": "openspec.init",
-        "title": "OpenSpec: Initialize",
-        "icon": "$(rocket)"
-      },
-      {
-        "command": "openspec.applyChange",
-        "title": "Apply Change",
-        "icon": "$(check)"
-      },
-      {
-        "command": "openspec.ffChange",
-        "title": "Fast-Forward Change",
-        "icon": {
-          "light": "media/fast-forward-light.svg",
-          "dark": "media/fast-forward-dark.svg"
-        }
-      },
-      {
-        "command": "openspec.archiveChange",
-        "title": "OpenSpec: Archive Change",
-        "icon": "$(archive)"
-      },
-      {
-        "command": "openspec.opencode.startServer",
-        "title": "OpenSpec: Start OpenCode Server",
-        "icon": {
-          "light": "media/opencode-logo-light.svg",
-          "dark": "media/opencode-logo-dark.svg"
-        }
-      },
-      {
-        "command": "openspec.opencode.openUi",
-        "title": "OpenSpec: Open OpenCode UI",
-        "icon": "$(link-external)"
-      },
-      {
-        "command": "openspec.opencode.newChange",
-        "title": "OpenSpec: New Change (OpenCode)",
-        "icon": "$(add)"
-      },
-      {
-        "command": "openspec.opencode.generateRunnerScript",
-        "title": "OpenSpec: Generate Runner Script"
-      },
-      {
-        "command": "openspec.opencode.runRunnerAttached",
-        "title": "OpenSpec: Run Runner Attached"
-      },
       {
         "command": "openspec.chat.open",
         "title": "OpenSpec: Open Chat",
@@ -146,67 +73,14 @@
       {
         "command": "openspec.chat.archive",
         "title": "OpenSpec: Archive Change (Chat)"
-      },
-      {
-        "command": "openspec.debug.exportLogs",
-        "title": "OpenSpec: Export Debug Logs"
-      },
-      {
-        "command": "openspec.debug.toggle",
-        "title": "OpenSpec: Toggle Debug Mode"
-      },
-      {
-        "command": "openspec.debug.showOutput",
-        "title": "OpenSpec: Show Debug Output"
       }
     ],
-    "menus": {
-      "view/title": [
-        {
-          "command": "openspec.opencode.startServer",
-          "when": "view == openspecExplorer && openspec:initialized",
-          "group": "navigation@1"
-        },
-        {
-          "command": "openspec.opencode.openUi",
-          "when": "view == openspecExplorer && openspec:initialized",
-          "group": "navigation@2"
-        },
-        {
-          "command": "openspec.opencode.newChange",
-          "when": "view == openspecExplorer && openspec:initialized",
-          "group": "navigation@3"
-        },
-        {
-          "command": "openspec.init",
-          "when": "view == openspecWelcome && !openspec:initialized",
-          "group": "navigation@1"
-        }
-      ],
-      "view/item/context": [
-        {
-          "command": "openspec.applyChange",
-          "when": "view == openspecExplorer && viewItem == change:active",
-          "group": "inline"
-        },
-        {
-          "command": "openspec.ffChange",
-          "when": "view == openspecExplorer && viewItem == change:active:no-tasks",
-          "group": "inline"
-        },
-        {
-          "command": "openspec.archiveChange",
-          "when": "view == openspecExplorer && (viewItem == change:active || viewItem == change:active:no-tasks)",
-          "group": "inline"
-        }
-      ]
-    },
     "keybindings": [
       {
         "command": "openspec.chat.open",
         "key": "ctrl+shift+o",
         "mac": "cmd+shift+o",
-        "when": "openspec:initialized"
+        "when": "openspec:chatEnabled"
       },
       {
         "command": "openspec.chat.messageSent",

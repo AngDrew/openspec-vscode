@@ -2,7 +2,6 @@ import * as vscode from 'vscode';
 import { ErrorHandler } from '../utils/errorHandler';
 import { SessionManager } from '../services/sessionManager';
 import { AcpClient } from '../services/acpClient';
-import { PortManager } from '../services/portManager';
 import { AcpClientCapabilities } from '../services/acpClientCapabilities';
 
 export interface ChatMessage {
@@ -98,12 +97,14 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
     webviewView.webview.html = this._getHtmlContent(webviewView.webview);
     this._setupMessageHandling(webviewView.webview);
-    
+
     // Restore session data if exists
     this._restoreSession();
 
-    const portManager = PortManager.getInstance();
-    this.setConnectionState(this._acpClient.isClientConnected(), portManager.getSelectedPort());
+    // Send initial session metadata if available
+    this._sendSessionMetadata();
+
+    this.setConnectionState(this._acpClient.isClientConnected());
 
     // Update context when view is visible
     webviewView.onDidChangeVisibility(() => {
@@ -128,8 +129,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     });
 
     this._acpClient.onConnectionChange((connected) => {
-      const portManager = PortManager.getInstance();
-      this.setConnectionState(connected, portManager.getSelectedPort());
+      this.setConnectionState(connected);
       if (!connected) {
         this.showConnectionError('Disconnected from OpenCode server', true);
       } else {
@@ -138,7 +138,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  private _handleAcpMessage(message: { type: string; content?: string; messageId?: string; delta?: string; status?: string; sessionId?: string; changeId?: string; message?: string }): void {
+  private _handleAcpMessage(message: { type: string; content?: string; messageId?: string; delta?: string; status?: string; sessionId?: string; changeId?: string; message?: string; modeId?: string; modelId?: string }): void {
     switch (message.type) {
       case 'text':
       case 'text_delta':
@@ -169,7 +169,32 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         if (message.sessionId) {
           this._sessionManager.setAcpSessionId(message.sessionId);
         }
+        // Send session metadata after session creation
+        this._sendSessionMetadata();
         break;
+      case 'modeUpdate':
+        this.postMessage({
+          type: 'modeUpdate',
+          modeId: message.modeId
+        });
+        break;
+      case 'modelUpdate':
+        this.postMessage({
+          type: 'modelUpdate',
+          modelId: message.modelId
+        });
+        break;
+    }
+  }
+
+  private _sendSessionMetadata(): void {
+    const metadata = this._acpClient.getSessionMetadata();
+    if (metadata.modes || metadata.models) {
+      this.postMessage({
+        type: 'sessionMetadata',
+        modes: metadata.modes,
+        models: metadata.models
+      });
     }
   }
 
@@ -314,12 +339,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  public setConnectionState(connected: boolean, port?: number): void {
+  public setConnectionState(connected: boolean): void {
     const state = connected ? 'connected' : 'disconnected';
     this.postMessage({
       type: 'connectionState',
-      state,
-      port
+      state
     });
   }
 
@@ -387,23 +411,17 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             case 'phaseClicked':
               await this._handlePhaseClick(message.phaseId);
               break;
-            case 'newChange':
-              await vscode.commands.executeCommand('openspec.chat.newChange');
-              break;
-            case 'fastForward':
-              await vscode.commands.executeCommand('openspec.chat.fastForward');
-              break;
-            case 'apply':
-              await vscode.commands.executeCommand('openspec.chat.apply');
-              break;
-            case 'archive':
-              await vscode.commands.executeCommand('openspec.chat.archive');
-              break;
             case 'retryConnection':
               await this._handleRetryConnection();
               break;
             case 'inputChanged':
               vscode.commands.executeCommand('setContext', 'openspec:inputEmpty', !message.content || message.content.trim().length === 0);
+              break;
+            case 'selectMode':
+              await this._handleSelectMode(message.modeId);
+              break;
+            case 'selectModel':
+              await this._handleSelectModel(message.modelId);
               break;
             default:
               ErrorHandler.debug(`Unknown message type: ${message.type}`);
@@ -521,6 +539,46 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  private async _handleSelectMode(modeId: string): Promise<void> {
+    try {
+      const sessionId = await this._sessionManager.getAcpSessionId();
+      if (!sessionId) {
+        ErrorHandler.debug('Cannot select mode: no active session');
+        return;
+      }
+
+      await this._acpClient.setMode(sessionId, modeId);
+      ErrorHandler.debug(`Mode changed to: ${modeId}`);
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      ErrorHandler.handle(err, 'selecting mode', false);
+      this.postMessage({
+        type: 'error',
+        message: `Failed to select mode: ${err.message}`
+      });
+    }
+  }
+
+  private async _handleSelectModel(modelId: string): Promise<void> {
+    try {
+      const sessionId = await this._sessionManager.getAcpSessionId();
+      if (!sessionId) {
+        ErrorHandler.debug('Cannot select model: no active session');
+        return;
+      }
+
+      await this._acpClient.setModel(sessionId, modelId);
+      ErrorHandler.debug(`Model changed to: ${modelId}`);
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      ErrorHandler.handle(err, 'selecting model', false);
+      this.postMessage({
+        type: 'error',
+        message: `Failed to select model: ${err.message}`
+      });
+    }
+  }
+
   public clearChat(): void {
     this._session.messages = [];
     this._session.updatedAt = Date.now();
@@ -599,59 +657,36 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             </div>
             <button class="clear-button" id="clearBtn" title="Clear chat history">Clear</button>
           </div>
-          <div class="phase-tracker" id="phaseTracker">
-            <div class="phase-tracker-header">
-              <span class="phase-tracker-title">Workflow</span>
+          <div class="selectors-bar" id="selectorsBar">
+            <div class="selector-group">
+              <label class="selector-label">Mode:</label>
+              <div id="modeSelectorContainer" class="mode-selector-container">
+                <!-- Mode selector will be dynamically inserted here (toggle for 2, dropdown for more) -->
+              </div>
             </div>
-            <div class="phase-tracker-container" id="phaseTrackerContainer">
-              <div class="phase-item" data-phase="new" data-status="pending">
-                <div class="phase-indicator">
-                  <span class="phase-number">1</span>
-                  <span class="phase-icon phase-icon-pending">○</span>
-                  <span class="phase-icon phase-icon-active">●</span>
-                  <span class="phase-icon phase-icon-completed">✓</span>
-                </div>
-                <span class="phase-name">New Change</span>
-              </div>
-              <div class="phase-connector"></div>
-              <div class="phase-item" data-phase="drafting" data-status="pending">
-                <div class="phase-indicator">
-                  <span class="phase-number">2</span>
-                  <span class="phase-icon phase-icon-pending">○</span>
-                  <span class="phase-icon phase-icon-active">●</span>
-                  <span class="phase-icon phase-icon-completed">✓</span>
-                </div>
-                <span class="phase-name">Drafting</span>
-              </div>
-              <div class="phase-connector"></div>
-              <div class="phase-item" data-phase="implementation" data-status="pending">
-                <div class="phase-indicator">
-                  <span class="phase-number">3</span>
-                  <span class="phase-icon phase-icon-pending">○</span>
-                  <span class="phase-icon phase-icon-active">●</span>
-                  <span class="phase-icon phase-icon-completed">✓</span>
-                </div>
-                <span class="phase-name">Implementation</span>
-              </div>
+            <div class="selector-group">
+              <label class="selector-label">Model:</label>
+              <button id="modelSelectorBtn" class="model-selector-btn" title="Select model" style="display: none;">
+                <span id="currentModelLabel">Select Model</span>
+                <span class="model-selector-arrow">▼</span>
+              </button>
             </div>
           </div>
-          <div class="action-buttons" id="actionButtons">
-            <button class="action-btn action-btn-new" data-action="newChange" title="Start a new OpenSpec change">
-              <span class="action-btn-icon">+</span>
-              <span class="action-btn-text">New Change</span>
-            </button>
-            <button class="action-btn action-btn-ff" data-action="fastForward" title="Fast-forward change artifacts">
-              <span class="action-btn-icon">»</span>
-              <span class="action-btn-text">Fast Forward</span>
-            </button>
-            <button class="action-btn action-btn-apply" data-action="apply" title="Apply change tasks">
-              <span class="action-btn-icon">▶</span>
-              <span class="action-btn-text">Apply</span>
-            </button>
-            <button class="action-btn action-btn-archive" data-action="archive" title="Archive completed change">
-              <span class="action-btn-icon">[]</span>
-              <span class="action-btn-text">Archive</span>
-            </button>
+          <!-- Model Selection Dialog -->
+          <div id="modelDialog" class="model-dialog" style="display: none;">
+            <div class="model-dialog-overlay"></div>
+            <div class="model-dialog-content">
+              <div class="model-dialog-header">
+                <h3>Select Model</h3>
+                <button id="modelDialogClose" class="model-dialog-close" title="Close">×</button>
+              </div>
+              <div class="model-dialog-search">
+                <input type="text" id="modelSearchInput" placeholder="Search models..." autocomplete="off">
+              </div>
+              <div id="modelDialogList" class="model-dialog-list">
+                <!-- Models will be populated here -->
+              </div>
+            </div>
           </div>
           <div class="messages-container" id="messagesContainer">
             <div class="empty-state" id="emptyState">

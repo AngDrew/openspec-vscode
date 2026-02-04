@@ -1,84 +1,17 @@
 import * as vscode from 'vscode';
 
-import { ErrorHandler } from '../utils/errorHandler';
-import { WorkspaceUtils } from '../utils/workspace';
 import { ExtensionRuntimeState } from './runtime';
 
 export function registerOpenSpecWatcher(
-  context: vscode.ExtensionContext,
-  runtime: ExtensionRuntimeState
+  _context: vscode.ExtensionContext,
+  _runtime: ExtensionRuntimeState
 ): void {
-  const workspaceFolders = vscode.workspace.workspaceFolders;
-  if (!workspaceFolders || workspaceFolders.length === 0) {
-    ErrorHandler.warning('No workspace folder found', false);
-    return;
-  }
-
-  const workspaceFolder = workspaceFolders[0];
-  // Only watch the workspace-root openspec folder.
-  // This avoids accidentally binding to nested examples (e.g. testingproject/openspec).
-  const openspecGlob = new vscode.RelativePattern(workspaceFolder, 'openspec/**');
-
-  try {
-    runtime.fileWatcher = vscode.workspace.createFileSystemWatcher(openspecGlob);
-
-    runtime.fileWatcher.onDidCreate(() => {
-      debounce(runtime, () => {
-        WorkspaceUtils.invalidateCache();
-        runtime.explorerProvider?.refresh();
-        checkWorkspaceInitialization(runtime);
-      }, 500);
-    });
-
-    runtime.fileWatcher.onDidChange(() => {
-      debounce(runtime, () => {
-        WorkspaceUtils.invalidateCache();
-        runtime.explorerProvider?.refresh();
-      }, 500);
-    });
-
-    runtime.fileWatcher.onDidDelete(() => {
-      debounce(runtime, () => {
-        WorkspaceUtils.invalidateCache();
-        runtime.explorerProvider?.refresh();
-        checkWorkspaceInitialization(runtime);
-      }, 500);
-    });
-
-    context.subscriptions.push(runtime.fileWatcher);
-    ErrorHandler.info('File system watcher initialized', false);
-  } catch (error) {
-    ErrorHandler.handle(error as Error, 'Failed to setup file system watcher');
-  }
+  return;
 }
 
-export function checkWorkspaceInitialization(runtime: ExtensionRuntimeState): void {
-  const workspaceFolders = vscode.workspace.workspaceFolders;
-  if (!workspaceFolders || workspaceFolders.length === 0) {
-    ErrorHandler.warning('No workspace folder found', false);
-    vscode.commands.executeCommand('setContext', 'openspec:initialized', false);
-    return;
-  }
-
-  const workspaceFolder = workspaceFolders[0];
-  ErrorHandler.debug(`[checkWorkspaceInitialization] Checking workspace: ${workspaceFolder.uri.fsPath}`);
-
-  WorkspaceUtils.isOpenSpecInitialized(workspaceFolder)
-    .then(isInitialized => {
-      ErrorHandler.debug(`[checkWorkspaceInitialization] Setting openspec:initialized to ${isInitialized}`);
-      vscode.commands.executeCommand('setContext', 'openspec:initialized', isInitialized);
-      if (runtime.explorerProvider) {
-        runtime.explorerProvider.refresh();
-        ErrorHandler.debug('[checkWorkspaceInitialization] Explorer provider refreshed');
-      } else {
-        ErrorHandler.warning('[checkWorkspaceInitialization] No explorer provider available', false);
-      }
-      ErrorHandler.info(`Workspace initialization status: ${isInitialized}`, false);
-    })
-    .catch(error => {
-      ErrorHandler.handle(error as Error, 'Failed to check workspace initialization');
-      vscode.commands.executeCommand('setContext', 'openspec:initialized', false);
-    });
+export function checkWorkspaceInitialization(_runtime: ExtensionRuntimeState): void {
+  vscode.commands.executeCommand('setContext', 'openspec:initialized', false);
+  return;
 }
 
 export function debounce(

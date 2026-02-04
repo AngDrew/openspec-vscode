@@ -42,20 +42,12 @@ Graceful behavior:
 
 ## What you get
 
-The extension to automate OpenSpec with:
+A focused OpenSpec chat experience:
 
 - **Chat UI Panel**: Full-featured chat interface for natural conversations with OpenCode AI
   - Message history with markdown rendering and syntax highlighting
   - Real-time streaming responses with typing indicators
-  - Action buttons for workflow commands (New Change, Fast-Forward, Apply, Archive)
-- Connection status indicator for server state
-  - Phase tracker showing current workflow progress
-- OpenSpec Explorer tree: active changes, archived changes, and workspace specs
-- Change details webview: renders artifacts and previews other files in a change folder
-- Opencode CLI-first actions: start OpenCode server, fast-forward artifacts, apply tasks, archive changes, draft requirements interactively
-
-![alt text](spec-creation.png)
-![alt text](explorer.png)
+  - Connection status indicator for server state
 
 The extension is intentionally not a GUI wizard. It keeps OpenSpec as the source of truth and drives automation through terminals.
 
@@ -77,21 +69,9 @@ Runner fallback: if `opencode` is not on your PATH, the bundled runner can fall 
 
 ## Quickstart
 
-1. Open a folder that contains `openspec/` at the workspace root.
-   - If not initialized yet: run `OpenSpec: Initialize` (runs `openspec init` in a terminal).
+1. Open any folder in VS Code.
 2. Open the OpenSpec view from the Activity Bar.
-3. Start the server: run command or just press the opencode icon `OpenSpec: Start OpenCode Server`.
-   - It runs:
-
-```bash
-opencode serve --port 4099 --print-logs
-```
-
-4. Open the Chat UI: run `OpenSpec: Open Chat` or use the chat icon in the OpenSpec view.
-5. Create/spec a change: use the New Change action or run `OpenSpec: New Change (OpenCode)` (plan mode first).
-6. Fast-forward artifacts: click `Fast-Forward Change` on scaffold-only changes.
-7. Apply tasks: click `Apply Change` and enter how many tasks to include per OpenCode run (batch size within the same parent task section; default 1).
-8. Monitor: run `OpenSpec: Open OpenCode UI` or open `http://localhost:4099`.
+3. Open the Chat UI: run `OpenSpec: Open Chat`.
 
 ## Chat UI
 
@@ -99,45 +79,22 @@ The Chat UI provides a conversational interface for OpenSpec workflows:
 
 ### Features
 
-- **Natural Conversations**: Chat with OpenCode AI using natural language to create changes and implement features
+- **Natural Conversations**: Chat with OpenCode AI using natural language
 - **Message History**: Persistent conversation history that survives VS Code reloads
 - **Markdown Rendering**: AI responses are rendered with full markdown support including code blocks with syntax highlighting
 - **Streaming Responses**: Real-time streaming with typing indicators
 - **Connection Status**: Connection indicator shows connected, connecting, or disconnected state
-- **Phase Tracker**: Visual progress indicator showing current workflow phase (New Change, Drafting, Implementation)
-- **Action Buttons**: Quick-access buttons for common actions like Fast-Forward and Apply
 
 ### Opening the Chat
 
 - Run command: `OpenSpec: Open Chat` (or press `Ctrl+Shift+P` and type "Open Chat")
-- Click the chat icon in the OpenSpec Explorer view
-- Use keyboard shortcut (configurable in settings under `openspec.chat.keybinding`)
+- Use the keyboard shortcut (Ctrl/Cmd + Shift + O)
 
 ### Chat Workflow Example
 
 1. **Start a conversation**: Open the chat and describe what you want to build
-2. **Create a change**: Click the New Change action and answer the prompts
-3. **Generate artifacts**: After the scaffold is created, click Fast-Forward to generate all spec files
-4. **Review**: Check the generated proposal.md, design.md, and tasks.md
-5. **Implement**: Click Apply to start implementing tasks
-6. **Monitor**: Watch progress in the chat and at `http://localhost:4099`
-7. **Complete**: When done, click Archive to archive the change
+2. **Iterate**: Continue the conversation as the agent responds
 
-## Apply Change (Ralph loop)
-
-When you click Apply Change, the extension:
-
-- best-effort ensures a local OpenCode server is listening on port 4099
-- runs the bundled cross-platform runner `ralph_opencode.mjs`
-- iterates through `openspec/changes/<changeId>/tasks.md` in order using the `openspec-apply-change` skill
-
-Manual runner usage:
-
-```bash
-node ralph_opencode.mjs --attach http://localhost:4099 --change your-change-id [--count <n>]
-```
-
-`--count <n>` includes up to `n` tasks per `opencode run` iteration (default: `1`).
 
 Batching is bounded to the parent section of the first task id in the batch (e.g. `2.2` can batch `2.3`, but not `3.1`), so a run may include fewer than `n` tasks at a parent boundary.
 

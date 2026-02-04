@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
 import { spawn, ChildProcess } from 'child_process';
 import { ErrorHandler } from '../utils/errorHandler';
-import { PortManager } from './portManager';
 import { AcpTransport } from './acpTransport';
 import {
   InitializeRequest, InitializeResponse, NewSessionRequest, NewSessionResponse,
@@ -28,7 +27,6 @@ export class AcpClient {
   private static readonly OFFLINE_RETRY_INTERVAL = 30000;
   private static instance: AcpClient;
   
-  private portManager: PortManager;
   private config: AcpConnectionConfig;
   private transport: AcpTransport | undefined;
   private acpProcess: ChildProcess | undefined;
@@ -66,7 +64,6 @@ export class AcpClient {
   private releaseTerminalHandler: ((params: ReleaseTerminalRequest) => Promise<ReleaseTerminalResponse>) | null = null;
 
   private constructor() {
-    this.portManager = PortManager.getInstance();
     this.config = {
       host: AcpClient.DEFAULT_HOST,
       port: 4099,
@@ -114,7 +111,7 @@ export class AcpClient {
     this.isConnecting = true;
 
     try {
-      const port = this.portManager.getSelectedPort() || this.config.port;
+      const port = this.config.port;
       
       for (let attempt = 1; attempt <= this.config.retryAttempts; attempt++) {
         try {

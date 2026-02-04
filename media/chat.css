@@ -1828,3 +1828,281 @@ body {
   transform: translateZ(0);
   backface-visibility: hidden;
 }
+
+/* ========================================
+   Model & Mode Selectors
+   ======================================== */
+
+/* Selectors Bar */
+.selectors-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 16px;
+  background-color: var(--chat-header-bg);
+  border-bottom: 1px solid var(--chat-border);
+  flex-shrink: 0;
+}
+
+.selector-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.selector-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--chat-foreground-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Mode Selector Toggle (for 2 modes) */
+.mode-toggle {
+  display: flex;
+  align-items: center;
+  background-color: var(--chat-input-bg);
+  border: 1px solid var(--chat-input-border);
+  border-radius: 6px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.mode-toggle-btn {
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  border: none;
+  background-color: transparent;
+  color: var(--chat-foreground-muted);
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+}
+
+.mode-toggle-btn:hover {
+  color: var(--chat-fg);
+}
+
+.mode-toggle-btn.active {
+  background-color: var(--chat-button-bg);
+  color: var(--chat-button-fg);
+}
+
+/* Mode Selector Dropdown (for 3+ modes) */
+.mode-selector {
+  padding: 4px 8px;
+  font-size: 12px;
+  background-color: var(--chat-input-bg);
+  color: var(--chat-input-fg);
+  border: 1px solid var(--chat-input-border);
+  border-radius: 4px;
+  cursor: pointer;
+  min-width: 100px;
+}
+
+.mode-selector:focus {
+  outline: none;
+  border-color: var(--chat-focus-border);
+}
+
+/* Model Selector Button */
+.model-selector-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  background-color: var(--chat-input-bg);
+  color: var(--chat-input-fg);
+  border: 1px solid var(--chat-input-border);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  min-width: 140px;
+  max-width: 200px;
+}
+
+.model-selector-btn:hover {
+  background-color: var(--chat-toolbar-hover);
+  border-color: var(--chat-focus-border);
+}
+
+.model-selector-btn:focus {
+  outline: none;
+  border-color: var(--chat-focus-border);
+}
+
+#currentModelLabel {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-selector-arrow {
+  font-size: 10px;
+  color: var(--chat-foreground-muted);
+}
+
+/* Model Selection Dialog */
+.model-dialog {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.model-dialog-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  animation: fadeIn 0.2s ease;
+}
+
+.model-dialog-content {
+  position: relative;
+  background-color: var(--chat-bg);
+  border: 1px solid var(--chat-border);
+  border-radius: 8px;
+  width: 90%;
+  max-width: 500px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  animation: dialogSlideIn 0.2s ease;
+}
+
+@keyframes dialogSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.model-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--chat-border);
+}
+
+.model-dialog-header h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.model-dialog-close {
+  background: none;
+  border: none;
+  font-size: 20px;
+  color: var(--chat-foreground-muted);
+  cursor: pointer;
+  padding: 0;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+}
+
+.model-dialog-close:hover {
+  background-color: var(--chat-toolbar-hover);
+  color: var(--chat-fg);
+}
+
+.model-dialog-search {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--chat-border);
+}
+
+.model-dialog-search input {
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 13px;
+  background-color: var(--chat-input-bg);
+  color: var(--chat-input-fg);
+  border: 1px solid var(--chat-input-border);
+  border-radius: 4px;
+  outline: none;
+}
+
+.model-dialog-search input:focus {
+  border-color: var(--chat-focus-border);
+}
+
+.model-dialog-list {
+  flex: 1;
+  overflow-y: auto;
+  max-height: 400px;
+}
+
+.model-dialog-item {
+  display: flex;
+  align-items: center;
+  padding: 10px 16px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--chat-border);
+  transition: background-color 0.15s ease;
+}
+
+.model-dialog-item:last-child {
+  border-bottom: none;
+}
+
+.model-dialog-item:hover {
+  background-color: var(--chat-toolbar-hover);
+}
+
+.model-dialog-item.selected {
+  background-color: var(--vscode-list-activeSelectionBackground);
+}
+
+.model-dialog-item-name {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.model-dialog-item-id {
+  font-size: 11px;
+  color: var(--chat-foreground-muted);
+  font-family: var(--vscode-editor-font-family);
+}
+
+.model-dialog-item-check {
+  margin-left: 8px;
+  font-size: 14px;
+  color: var(--vscode-testing-iconPassed);
+  opacity: 0;
+}
+
+.model-dialog-item.selected .model-dialog-item-check {
+  opacity: 1;
+}
+
+.model-dialog-empty {
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--chat-foreground-muted);
+  font-size: 13px;
+}
