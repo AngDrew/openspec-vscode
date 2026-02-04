@@ -8,7 +8,7 @@
   const clearBtn = document.getElementById('clearBtn');
   const emptyState = document.getElementById('emptyState');
   const typingIndicator = document.getElementById('typingIndicator');
-  const cancelBtn = document.getElementById('cancelBtn');
+  const typingText = document.getElementById('typingText');
   const connectionStatus = document.getElementById('connectionStatus');
   const connectionErrorBanner = document.getElementById('connectionErrorBanner');
   const connectionErrorMessage = document.getElementById('connectionErrorMessage');
@@ -39,6 +39,7 @@
   let isUserScrolling = false;
   let scrollTimeout = null;
   let isStreaming = false;
+  let lastWorkUpdate = '';
 
   // Throttling state for performance optimization
   let pendingUpdate = null;
@@ -76,6 +77,7 @@
     requestSessionData();
     focusInput();
     updateConnectionStatus('disconnected');
+    updateWorkingUi();
   }
 
   // Setup event listeners
@@ -94,17 +96,13 @@
     // Auto-resize textarea on input
     messageInput.addEventListener('input', adjustTextareaHeight);
 
-    // Clear button
+    // New chat button
     clearBtn.addEventListener('click', () => {
-      vscode.postMessage({ type: 'clearChat' });
+      if (isStreaming) {
+        return;
+      }
+      vscode.postMessage({ type: 'newSession' });
     });
-
-    // Cancel button
-    if (cancelBtn) {
-      cancelBtn.addEventListener('click', () => {
-        vscode.postMessage({ type: 'cancelStreaming' });
-      });
-    }
 
     // Listen for messages from extension
     window.addEventListener('message', handleExtensionMessage);
@@ -194,6 +192,9 @@
   }
 
   function selectMode(modeId) {
+    if (isStreaming) {
+      return;
+    }
     if (modeId === currentModeId) return;
     currentModeId = modeId;
     renderModeSelector();
@@ -223,6 +224,9 @@
   }
 
   function openModelDialog() {
+    if (isStreaming) {
+      return;
+    }
     if (!modelDialog || !modelSearchInput || !modelDialogList) return;
 
     filteredModels = [...availableModels];
@@ -354,6 +358,9 @@
   }
 
   function selectModel(modelId) {
+    if (isStreaming) {
+      return;
+    }
     if (modelId === currentModelId) {
       closeModelDialog();
       return;
@@ -522,6 +529,8 @@
       case 'clearChat':
         clearMessages();
         focusInput();
+        lastWorkUpdate = '';
+        updateWorkingUi();
         break;
       case 'sessionData':
         loadSessionData(message.session);
@@ -553,12 +562,22 @@
         } else {
           hideTypingIndicator();
         }
+        updateWorkingUi();
         break;
       case 'streamingCancelled':
         isStreaming = false;
         hideTypingIndicator();
+        updateWorkingUi();
         if (message.messageId) {
           markMessageAsPartial(message.messageId, message.partialContent);
+        }
+        break;
+      case 'workUpdate':
+        if (typeof message.text === 'string' && message.text.trim().length > 0) {
+          lastWorkUpdate = message.text.trim();
+          if (isStreaming) {
+            updateTypingText();
+          }
         }
         break;
       case 'displayArtifact':
@@ -972,6 +991,10 @@
 
   // Send message to extension
   function sendMessage() {
+    if (isStreaming) {
+      vscode.postMessage({ type: 'cancelStreaming' });
+      return;
+    }
     const content = messageInput.value.trim();
     if (!content) {
       focusInput();
@@ -986,6 +1009,56 @@
     messageInput.value = '';
     adjustTextareaHeight();
     focusInput();
+  }
+
+  function updateTypingText() {
+    if (!typingText) {
+      return;
+    }
+    typingText.textContent = lastWorkUpdate || 'AI is thinking...';
+  }
+
+  function updateWorkingUi() {
+    if (!sendBtn || !clearBtn || !messageInput) {
+      return;
+    }
+
+    // Disable all other interactive controls while the agent is working.
+    const controlsToToggle = [];
+    if (modelSelectorBtn) controlsToToggle.push(modelSelectorBtn);
+    if (connectionErrorRetryBtn) controlsToToggle.push(connectionErrorRetryBtn);
+    const modeControls = modeSelectorContainer
+      ? Array.from(modeSelectorContainer.querySelectorAll('button, select'))
+      : [];
+    controlsToToggle.push(...modeControls);
+
+    if (isStreaming) {
+      sendBtn.textContent = 'Cancel';
+      sendBtn.setAttribute('aria-label', 'Cancel');
+      messageInput.disabled = true;
+      clearBtn.disabled = true;
+      controlsToToggle.forEach((el) => {
+        if (el) {
+          el.disabled = true;
+        }
+      });
+      closeModelDialog();
+      updateTypingText();
+    } else {
+      sendBtn.textContent = 'Send';
+      sendBtn.setAttribute('aria-label', 'Send message');
+      messageInput.disabled = false;
+      clearBtn.disabled = false;
+      controlsToToggle.forEach((el) => {
+        if (el) {
+          el.disabled = false;
+        }
+      });
+      lastWorkUpdate = '';
+      if (typingText) {
+        typingText.textContent = 'AI is thinking...';
+      }
+    }
   }
 
   // Adjust textarea height based on content
@@ -1581,6 +1654,13 @@
     clearToolCalls();
   }
 
+  // Tool call UI isn't implemented yet, but other code expects this.
+  // Keep as a safe no-op to avoid runtime errors.
+  function clearToolCalls() {
+    lastWorkUpdate = '';
+    updateTypingText();
+  }
+
   // Load session data
   function loadSessionData(session) {
     if (session && session.messages) {
@@ -1731,6 +1811,7 @@
     if (typingIndicator) {
       typingIndicator.style.display = 'flex';
       isStreaming = true;
+      updateTypingText();
       scrollToBottom();
     }
   }

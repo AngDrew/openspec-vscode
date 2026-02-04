@@ -468,7 +468,8 @@ export type AcpMessageType =
   | 'question_tool'
   | 'session_created'
   | 'plan'
-  | 'tool_call_update';
+  | 'tool_call_update'
+  | 'agent_thought_chunk';
 
 export interface AcpMessage {
   type: AcpMessageType;
@@ -496,6 +497,11 @@ export interface AcpConnectionConfig {
   timeoutMs: number;
   retryAttempts: number;
   retryDelayMs: number;
+  /**
+   * Path/command used to launch OpenCode CLI.
+   * Defaults to `opencode`.
+   */
+  opencodePath?: string;
 }
 
 export interface OfflineState {

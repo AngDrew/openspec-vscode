@@ -3,6 +3,7 @@ import { ErrorHandler } from '../utils/errorHandler';
 import { SessionManager } from '../services/sessionManager';
 import { AcpClient } from '../services/acpClient';
 import { AcpClientCapabilities } from '../services/acpClientCapabilities';
+import { AcpMessage, ToolCall } from '../services/acpTypes';
 
 export interface ChatMessage {
   id: string;
@@ -57,6 +58,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private _acpClient: AcpClient;
   private _sessionManager: SessionManager;
   private _streamingBuffers = new Map<string, string>();
+  private _activeStreamingMessageId: string | undefined;
+  private _isWorking = false;
 
   private _capabilities: AcpClientCapabilities;
 
@@ -138,11 +141,23 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  private _handleAcpMessage(message: { type: string; content?: string; messageId?: string; delta?: string; status?: string; sessionId?: string; changeId?: string; message?: string; modeId?: string; modelId?: string }): void {
+  private _handleAcpMessage(message: AcpMessage | { type: 'modeUpdate'; modeId?: string } | { type: 'modelUpdate'; modelId?: string }): void {
     switch (message.type) {
       case 'text':
       case 'text_delta':
         this._handleAssistantStream(message);
+        break;
+      case 'agent_thought_chunk':
+      case 'tool_call':
+      case 'tool_call_update':
+      case 'plan':
+        // Keep the UI in "working" state even when we haven't received text deltas yet.
+        if (this._isWorking) {
+          this.setStreamingState(true, message.messageId);
+        }
+
+        // Surface lightweight progress updates to the webview.
+        this._postWorkUpdate(message);
         break;
       case 'streaming_start':
         this.setStreamingState(true, message.messageId);
@@ -198,17 +213,18 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private _updateOrAddAssistantMessage(content: string, messageId?: string): void {
+  private _updateOrAddAssistantMessage(content: string, messageId?: string, isStreaming?: boolean): void {
     const existingMessage = this._session.messages.find(m => m.id === messageId);
     
     if (existingMessage && existingMessage.role === 'assistant') {
-      this.updateMessage(messageId || '', content, false);
+      this.updateMessage(messageId || '', content, isStreaming);
     } else {
       this.addMessage({
         id: messageId || this._generateMessageId(),
         role: 'assistant',
         content: content,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        metadata: isStreaming !== undefined ? { isStreaming } : undefined
       });
     }
   }
@@ -219,32 +235,36 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       return;
     }
 
-    const targetMessageId = this._resolveStreamingMessageId(message.messageId);
-    const bufferKey = targetMessageId || message.messageId || this._generateMessageId();
+    let bufferKey = this._activeStreamingMessageId;
+    if (!bufferKey) {
+      bufferKey = this._generateMessageId();
+      this._activeStreamingMessageId = bufferKey;
+    }
 
     if (message.type === 'text_delta') {
       const current = this._streamingBuffers.get(bufferKey) || '';
       const next = current + incomingText;
       this._streamingBuffers.set(bufferKey, next);
-      this._updateOrAddAssistantMessage(next, bufferKey);
-      this.setStreamingState(true, bufferKey);
+      this._activeStreamingMessageId = bufferKey;
+      this._updateOrAddAssistantMessage(next, bufferKey, true);
+      if (this._isWorking) {
+        this.setStreamingState(true, bufferKey);
+      }
       return;
     }
 
     this._streamingBuffers.delete(bufferKey);
-    this._updateOrAddAssistantMessage(incomingText, bufferKey);
-    this.setStreamingState(false, bufferKey);
+    if (this._activeStreamingMessageId === bufferKey) {
+      this._activeStreamingMessageId = undefined;
+    }
+    this._updateOrAddAssistantMessage(incomingText, bufferKey, false);
+    if (this._isWorking) {
+      this.setStreamingState(false, bufferKey);
+    }
   }
 
-  private _resolveStreamingMessageId(messageId?: string): string | undefined {
-    if (messageId && this._session.messages.some(m => m.id === messageId)) {
-      return messageId;
-    }
-
-    const streamingMessage = this._session.messages.find(
-      m => m.role === 'assistant' && m.metadata?.isStreaming
-    );
-    return streamingMessage?.id || messageId;
+  private _resolveStreamingMessageId(_messageId?: string): string | undefined {
+    return this._activeStreamingMessageId;
   }
 
   private _createNewSession(): ChatSession {
@@ -396,8 +416,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             case 'sendMessage':
               await this._handleSendMessage(message.content);
               break;
-            case 'clearChat':
-              this.clearChat();
+            case 'newSession':
+              await this._handleNewSession();
               break;
             case 'getSession':
               this.postMessage({
@@ -461,12 +481,20 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   }
 
   private async _sendToAcp(content: string): Promise<void> {
+    // ACP does not reliably emit streaming_start/streaming_end for OpenCode.
+    // Drive the busy indicator ourselves: "working" from prompt send until it resolves.
+    this._isWorking = true;
+    this.setStreamingState(true);
     try {
       // Ensure connection
       if (!this._acpClient.isClientConnected()) {
         const connected = await this._acpClient.connect();
         if (!connected) {
-          this.showConnectionError('Failed to connect to OpenCode server', true);
+          const detail = this._acpClient.getLastConnectionError();
+          this.showConnectionError(
+            detail ? `Failed to connect to OpenCode: ${detail}` : 'Failed to connect to OpenCode server',
+            true
+          );
           return;
         }
       }
@@ -481,15 +509,72 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       }
 
       if (!sessionId) {
-        this.showConnectionError('No active ACP session', true);
+        this.showConnectionError('OpenCode connected, but no session could be created. Check OpenCode auth (`opencode auth`) and default model configuration.', true);
         return;
       }
+
+      // Ensure assistant output for this turn uses a stable, per-turn messageId.
+      // ACP updates don't provide message IDs, so we generate one per prompt.
+      this._activeStreamingMessageId = this._generateMessageId();
 
       // Send message via ACP
       await this._acpClient.sendPrompt(sessionId, content);
     } catch (error) {
       ErrorHandler.handle(error as Error, 'sending message to ACP', false);
       this.showConnectionError(`Failed to send message: ${error instanceof Error ? error.message : 'Unknown error'}`, true);
+    } finally {
+      // Finalize any partial assistant message.
+      if (this._activeStreamingMessageId) {
+        const messageId = this._activeStreamingMessageId;
+        const finalContent = this._streamingBuffers.get(messageId);
+        if (finalContent !== undefined) {
+          this.updateMessage(messageId, finalContent, false);
+          this._streamingBuffers.delete(messageId);
+        }
+        this._activeStreamingMessageId = undefined;
+      }
+      this._isWorking = false;
+      this.setStreamingState(false);
+    }
+  }
+
+  private _postWorkUpdate(message: AcpMessage): void {
+    try {
+      switch (message.type) {
+        case 'tool_call': {
+          const tool = message.tool || 'tool';
+          this.postMessage({ type: 'workUpdate', kind: 'tool', text: `Running: ${tool}` });
+          break;
+        }
+        case 'tool_call_update': {
+          const toolCall = message.toolCall as ToolCall | undefined;
+          if (!toolCall) {
+            break;
+          }
+          this.postMessage({
+            type: 'workUpdate',
+            kind: 'tool',
+            text: `${toolCall.tool}: ${toolCall.status}`
+          });
+          break;
+        }
+        case 'agent_thought_chunk': {
+          const text = (message.content || '').trim();
+          if (!text) {
+            break;
+          }
+          const snippet = text.length > 160 ? text.slice(0, 160) + '...' : text;
+          this.postMessage({ type: 'workUpdate', kind: 'thought', text: snippet });
+          break;
+        }
+        case 'plan':
+          this.postMessage({ type: 'workUpdate', kind: 'plan', text: 'Plan updated' });
+          break;
+        default:
+          break;
+      }
+    } catch (error) {
+      ErrorHandler.debug(`Failed to post work update: ${error}`);
     }
   }
 
@@ -499,9 +584,73 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       if (sessionId) {
         await this._acpClient.cancelSession(sessionId);
       }
+
+      const messageId = this._activeStreamingMessageId;
+      if (messageId) {
+        const partialContent = this._streamingBuffers.get(messageId) || '';
+        this.postMessage({
+          type: 'streamingCancelled',
+          messageId,
+          partialContent
+        });
+        this._streamingBuffers.delete(messageId);
+        this._activeStreamingMessageId = undefined;
+      }
       this.setStreamingState(false);
     } catch (error) {
       ErrorHandler.handle(error as Error, 'canceling streaming', false);
+    }
+  }
+
+  private async _handleNewSession(): Promise<void> {
+    try {
+      // If a turn is currently running, cancel it first.
+      try {
+        const currentAcpSessionId = await this._sessionManager.getAcpSessionId();
+        if (currentAcpSessionId) {
+          await this._acpClient.cancelSession(currentAcpSessionId);
+        }
+      } catch {
+        // Ignore
+      }
+
+      // Reset local chat state
+      this._session = this._createNewSession();
+      this._streamingBuffers.clear();
+      this._activeStreamingMessageId = undefined;
+      this._isWorking = false;
+      this.setStreamingState(false);
+      this.postMessage({ type: 'clearChat' });
+      this._sendSessionMetadata();
+
+      // Reset persisted session and start a fresh one
+      await this._sessionManager.clearCurrentSession();
+      await this._sessionManager.createSession(undefined, 'New chat');
+
+      // Reset ACP session (fresh model context)
+      this._acpClient.clearSession();
+      await this._sessionManager.clearAcpSessionId();
+
+      // Best-effort: create a fresh ACP session immediately so selectors reflect it.
+      try {
+        if (!this._acpClient.isClientConnected()) {
+          await this._acpClient.connect();
+        }
+        const newAcpSessionId = await this._acpClient.createSession();
+        if (newAcpSessionId) {
+          await this._sessionManager.setAcpSessionId(newAcpSessionId);
+        }
+      } catch {
+        // If session creation fails, we will retry on next message send.
+      }
+
+      this._sendSessionMetadata();
+    } catch (error) {
+      ErrorHandler.handle(error as Error, 'starting new chat session', false);
+      this.postMessage({
+        type: 'error',
+        message: error instanceof Error ? error.message : String(error)
+      });
     }
   }
 
@@ -655,7 +804,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
               <h1>OpenSpec Chat</h1>
               <span class="connection-status" id="connectionStatus">Disconnected</span>
             </div>
-            <button class="clear-button" id="clearBtn" title="Clear chat history">Clear</button>
+            <button class="clear-button" id="clearBtn" title="Start a new chat">New Chat</button>
           </div>
           <div class="selectors-bar" id="selectorsBar">
             <div class="selector-group">
@@ -699,8 +848,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
               <span></span>
               <span></span>
             </div>
-            <span class="typing-text">AI is thinking...</span>
-            <button class="cancel-button" id="cancelBtn" title="Cancel streaming">Cancel</button>
+            <span class="typing-text" id="typingText">AI is thinking...</span>
           </div>
           <div class="input-container">
             <textarea

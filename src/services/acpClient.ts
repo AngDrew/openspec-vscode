@@ -1,5 +1,8 @@
 import * as vscode from 'vscode';
 import { spawn, ChildProcess } from 'child_process';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { ErrorHandler } from '../utils/errorHandler';
 import { AcpTransport } from './acpTransport';
 import {
@@ -20,6 +23,9 @@ import {
 
 export class AcpClient {
   private static readonly DEFAULT_TIMEOUT = 30000;
+  // session/prompt is a long-running request that only resolves when the turn completes.
+  // OpenCode tool runs can exceed 30s, so disable per-request timeout for prompts.
+  private static readonly PROMPT_TIMEOUT_MS: number | null = null;
   private static readonly DEFAULT_RETRY_ATTEMPTS = 5;
   private static readonly DEFAULT_RETRY_DELAY = 1000;
   private static readonly DEFAULT_HOST = '127.0.0.1';
@@ -52,6 +58,7 @@ export class AcpClient {
   private activeToolCalls = new Map<string, ToolCall>();
   private activeStreamMessageId: string | undefined;
   private currentResponseBuffer = '';
+  private lastConnectionError: string | undefined;
   
   // Client capability handlers
   private readTextFileHandler: ((params: ReadTextFileRequest) => Promise<ReadTextFileResponse>) | null = null;
@@ -66,11 +73,110 @@ export class AcpClient {
   private constructor() {
     this.config = {
       host: AcpClient.DEFAULT_HOST,
-      port: 4099,
+      // ACP uses stdio; the HTTP port is not required for the extension.
+      // Default to 0 to avoid collisions if something is already bound.
+      port: 0,
       timeoutMs: AcpClient.DEFAULT_TIMEOUT,
       retryAttempts: AcpClient.DEFAULT_RETRY_ATTEMPTS,
-      retryDelayMs: AcpClient.DEFAULT_RETRY_DELAY
+      retryDelayMs: AcpClient.DEFAULT_RETRY_DELAY,
+      opencodePath: 'opencode'
     };
+  }
+
+  getLastConnectionError(): string | undefined {
+    return this.lastConnectionError;
+  }
+
+  private resolveOpencodePathFromSettings(): void {
+    const extConfig = vscode.workspace.getConfiguration('openspec');
+    const configuredPath = extConfig.get<string>('chat.opencodePath');
+    if (configuredPath && configuredPath.trim().length > 0) {
+      this.config.opencodePath = configuredPath.trim();
+    }
+  }
+
+  private detectOpencodePath(): string | undefined {
+    const candidates: string[] = [];
+
+    const envPath = process.env.OPENCODE_PATH || process.env.OPENCODE_BIN;
+    if (envPath) {
+      candidates.push(envPath);
+    }
+
+    const configured = this.config.opencodePath;
+    if (configured && configured.trim().length > 0) {
+      candidates.push(configured.trim());
+    }
+
+    // Search PATH for a concrete executable path
+    const pathEnv = process.env.PATH || '';
+    const pathDirs = pathEnv.split(path.delimiter).filter(Boolean);
+    const names = process.platform === 'win32'
+      ? ['opencode.exe', 'opencode.cmd', 'opencode.bat', 'opencode']
+      : ['opencode'];
+    for (const dir of pathDirs) {
+      for (const name of names) {
+        const full = path.join(dir, name);
+        try {
+          if (fs.existsSync(full)) {
+            candidates.push(full);
+          }
+        } catch {
+          // ignore
+        }
+      }
+    }
+
+    // Common install locations when PATH isn't propagated into VS Code.
+    const home = os.homedir();
+    if (process.platform === 'win32') {
+      const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
+      candidates.push(path.join(appData, 'npm', 'opencode.cmd'));
+      candidates.push(path.join(home, '.cargo', 'bin', 'opencode.exe'));
+      candidates.push(path.join(home, '.cargo', 'bin', 'opencode'));
+      candidates.push(path.join(home, 'scoop', 'shims', 'opencode.exe'));
+      candidates.push(path.join(home, 'scoop', 'shims', 'opencode.cmd'));
+    } else {
+      candidates.push(path.join(home, '.local', 'bin', 'opencode'));
+      candidates.push(path.join(home, '.cargo', 'bin', 'opencode'));
+      candidates.push('/usr/local/bin/opencode');
+      candidates.push('/opt/homebrew/bin/opencode');
+      candidates.push('/usr/bin/opencode');
+    }
+
+    // Prefer the first candidate that exists as a file.
+    for (const c of candidates) {
+      // If the user provided a bare command like "opencode", keep it (spawn will resolve it).
+      if (c === 'opencode') {
+        continue;
+      }
+
+      // On Windows, npm often creates both "opencode" (bash shim) and "opencode.cmd".
+      // Prefer the .cmd so it works reliably for the extension host.
+      if (process.platform === 'win32') {
+        const parsed = path.parse(c);
+        if (!parsed.ext && parsed.name.toLowerCase() === 'opencode') {
+          const cmdSibling = path.join(parsed.dir, 'opencode.cmd');
+          try {
+            if (fs.existsSync(cmdSibling)) {
+              return cmdSibling;
+            }
+          } catch {
+            // ignore
+          }
+        }
+      }
+      try {
+        if (fs.existsSync(c)) {
+          return c;
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    // Fall back to the configured command (usually "opencode")
+    return this.config.opencodePath;
   }
 
   static getInstance(): AcpClient {
@@ -109,8 +215,13 @@ export class AcpClient {
     }
 
     this.isConnecting = true;
+    this.lastConnectionError = undefined;
 
     try {
+      // Refresh launch config from VS Code settings.
+      this.resolveOpencodePathFromSettings();
+      this.config.opencodePath = this.detectOpencodePath() || this.config.opencodePath;
+
       const port = this.config.port;
       
       for (let attempt = 1; attempt <= this.config.retryAttempts; attempt++) {
@@ -129,8 +240,16 @@ export class AcpClient {
             return true;
           }
         } catch (error) {
+          const err = error instanceof Error ? error : new Error(String(error));
+          this.lastConnectionError = err.message;
           const errorMessage = error instanceof Error ? error.message : String(error);
           ErrorHandler.debug(`Connection attempt ${attempt} failed: ${errorMessage}`);
+
+          // If the CLI is missing, retries won't help.
+          const anyErr = error as unknown as { code?: unknown };
+          if (anyErr && (anyErr.code === 'ENOENT' || /\bENOENT\b/.test(errorMessage))) {
+            break;
+          }
 
           if (attempt < this.config.retryAttempts) {
             const delay = this.calculateBackoffDelay(attempt);
@@ -167,52 +286,15 @@ export class AcpClient {
       throw new Error('No workspace folder found');
     }
 
-    // Check if HTTP server is already running on this port
-    let httpRunning = false;
-    try {
-      httpRunning = await this.checkHttpServer(port);
-      if (httpRunning) {
-        ErrorHandler.debug(`HTTP server already running on port ${port}`);
-      }
-    } catch {
-      // Server not running, we'll start it
-    }
-
-    // Start ACP process
+    // ACP uses JSON-RPC over stdio. Start the subprocess and wait for initialize() to succeed.
     await this.startAcpProcess(port, workspaceFolder.uri.fsPath);
-
-    // If HTTP wasn't running, wait for it to be ready
-    if (!httpRunning) {
-      let attempts = 0;
-      const maxAttempts = 30;
-      while (attempts < maxAttempts) {
-        await this.delay(500);
-        const isReady = await this.checkHttpServer(port);
-        if (isReady) {
-          return true;
-        }
-        attempts++;
-      }
-      throw new Error(`HTTP server did not start within ${maxAttempts * 500}ms`);
-    }
-
+    await this.waitForAcpStdioReady(120000);
     return true;
   }
 
-  private async checkHttpServer(port: number): Promise<boolean> {
-    return new Promise((resolve) => {
-      const http = require('http');
-      const req = http.get(`http://127.0.0.1:${port}/global/health`, {
-        timeout: 1000
-      }, (res: { statusCode?: number }) => {
-        resolve(res.statusCode === 200);
-      });
-      req.on('error', () => resolve(false));
-      req.on('timeout', () => {
-        req.destroy();
-        resolve(false);
-      });
-    });
+  private async checkHttpServer(_port: number): Promise<boolean> {
+    // ACP uses stdio transport; kept for backward compatibility.
+    return false;
   }
 
   private async startAcpProcess(port: number, cwd: string): Promise<void> {
@@ -225,10 +307,63 @@ export class AcpClient {
 
     ErrorHandler.debug(`Starting ACP process on port ${port}...`);
 
+    const opencodePath = this.config.opencodePath || 'opencode';
+    const baseArgs = ['acp', '--port', String(port), '--hostname', '127.0.0.1'];
+
+    // On Windows, global npm installs expose a .cmd shim.
+    // Avoid spawning cmd.exe with fragile quoting; instead execute the Node entrypoint directly.
+    let command = opencodePath;
+    let args = baseArgs;
+    let shell = false;
+    if (process.platform === 'win32') {
+      const ext = path.extname(opencodePath).toLowerCase();
+      if (ext === '.cmd' || ext === '.bat') {
+        const npmDir = path.dirname(opencodePath);
+        const nodeEntrypoint = path.join(npmDir, 'node_modules', 'opencode-ai', 'bin', 'opencode');
+        if (fs.existsSync(nodeEntrypoint)) {
+          command = process.execPath;
+          args = [nodeEntrypoint, ...baseArgs];
+        } else {
+          // Fallback: let the OS shell resolve/execute the shim.
+          shell = true;
+        }
+      }
+    }
+
     // Start opencode acp without --print-logs to avoid stdout pollution
-    this.acpProcess = spawn('opencode', ['acp', '--port', String(port), '--hostname', '127.0.0.1'], {
+    // On Windows, PATH resolution differs between shells and VS Code.
+    // If this fails with ENOENT, the OpenCode CLI is not available to the extension host.
+    this.acpProcess = spawn(command, args, {
       cwd,
-      stdio: ['pipe', 'pipe', 'pipe']
+      stdio: ['pipe', 'pipe', 'pipe'],
+      shell
+    });
+
+    // Wait until the process is actually spawned, otherwise we'll race with setup.
+    await new Promise<void>((resolve, reject) => {
+      if (!this.acpProcess) {
+        reject(new Error('Failed to start ACP process'));
+        return;
+      }
+      const onError = (err: unknown) => reject(err instanceof Error ? err : new Error(String(err)));
+      this.acpProcess.once('spawn', () => resolve());
+      this.acpProcess.once('error', onError);
+    }).catch((err) => {
+      const anyErr = err as unknown as { code?: unknown };
+      if (anyErr && anyErr.code === 'ENOENT') {
+        throw new Error(
+          `OpenCode CLI not found: '${opencodePath}'. Install OpenCode (opencode) and restart VS Code, or set openspec.chat.opencodePath to the full path of the executable.`
+        );
+      }
+      throw err;
+    });
+
+    // Capture stderr to help troubleshoot startup failures.
+    this.acpProcess.stderr?.on('data', (data: Buffer) => {
+      const msg = data.toString().trim();
+      if (msg) {
+        ErrorHandler.debug(`[OpenCode stderr] ${msg}`);
+      }
     });
 
     // Create transport
@@ -249,30 +384,20 @@ export class AcpClient {
     );
 
     // Connect transport
-    await this.transport.connect(this.acpProcess);
-
-    // Initialize the connection
-    const initRequest: InitializeRequest = {
-      protocolVersion: 1,
-      clientCapabilities: {
-        fs: {
-          readTextFile: true,
-          writeTextFile: true
-        },
-        terminal: true
-      },
-      clientInfo: {
-        name: 'openspec-vscode',
-        version: '2.0.0'
+    try {
+      await this.transport.connect(this.acpProcess);
+    } catch (error) {
+      // Clean up on failed connect to prevent "write after stream destroyed" later.
+      this.transport.dispose();
+      this.transport = undefined;
+      if (this.acpProcess && !this.acpProcess.killed) {
+        this.acpProcess.kill('SIGTERM');
       }
-    };
+      this.acpProcess = undefined;
+      throw error;
+    }
 
-    const initResponse = await this.sendRequest<InitializeResponse>(
-      ACP_METHODS.initialize,
-      initRequest
-    );
-
-    ErrorHandler.debug(`ACP initialized: protocol v${initResponse.protocolVersion}`);
+    // Connection is initialized in waitForAcpStdioReady().
   }
 
   private async handleAgentRequest(method: string, params: unknown): Promise<unknown> {
@@ -432,22 +557,55 @@ export class AcpClient {
       case 'agent_thought_chunk': {
         const thought = update as AgentThoughtChunkUpdate;
         if (thought.content?.type === 'text' && thought.content.text) {
-          // Could expose this separately if needed
+          this.notifyMessageListeners({
+            type: 'agent_thought_chunk',
+            content: thought.content.text,
+            messageId: this.currentSessionId
+          });
         }
         break;
       }
     }
   }
 
-  private async sendRequest<T>(method: string, params: unknown): Promise<T> {
+  private async sendRequest<T>(method: string, params: unknown, timeoutMs?: number | null): Promise<T> {
     if (!this.transport) {
       throw new Error('Transport not initialized');
     }
-    const response = await this.transport.sendRequest(method, params);
+    const response = await this.transport.sendRequest(method, params, timeoutMs);
     if (response.error) {
       throw new Error(response.error.message);
     }
     return response.result as T;
+  }
+
+  private async waitForAcpStdioReady(timeoutMs: number): Promise<void> {
+    const startedAt = Date.now();
+
+    const initRequest: InitializeRequest = {
+      protocolVersion: 1,
+      clientCapabilities: {
+        fs: { readTextFile: true, writeTextFile: true },
+        terminal: true
+      },
+      clientInfo: { name: 'openspec-vscode', version: '2.0.0' }
+    };
+
+    while (Date.now() - startedAt < timeoutMs) {
+      try {
+        const init = await this.sendRequest<InitializeResponse>(ACP_METHODS.initialize, initRequest, 5000);
+        ErrorHandler.debug(`ACP initialized: protocol v${init.protocolVersion}`);
+        return;
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        if (!this.acpProcess || this.acpProcess.killed) {
+          throw new Error(`ACP process terminated before initialization: ${msg}`);
+        }
+        await this.delay(250);
+      }
+    }
+
+    throw new Error('ACP did not become ready within timeout');
   }
 
   private async sendNotification(method: string, params: unknown): Promise<void> {
@@ -471,6 +629,10 @@ export class AcpClient {
 
   async createSession(): Promise<string | undefined> {
     try {
+      // Ensure we have auth/model config; otherwise session/new will fail.
+      // This keeps the client "connected" but surfaces a clear error.
+      await this.ensureAuthorized();
+
       const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
       if (!workspaceFolder) {
         throw new Error('No workspace folder');
@@ -481,7 +643,7 @@ export class AcpClient {
         mcpServers: []
       };
 
-      const response = await this.sendRequest<NewSessionResponse>(ACP_METHODS.sessionNew, request);
+      const response = await this.sendRequest<NewSessionResponse>(ACP_METHODS.sessionNew, request, 120000);
 
       this.currentSessionId = response.sessionId;
       this.sessionMetadata.modes = response.modes || null;
@@ -501,6 +663,46 @@ export class AcpClient {
     }
   }
 
+  private async ensureAuthorized(): Promise<void> {
+    try {
+      const { execFile } = await import('child_process');
+      const opencodePath = this.config.opencodePath || 'opencode';
+
+      const run = (args: string[]) => new Promise<void>((resolve, reject) => {
+        // Try to run via node entrypoint on Windows if configured path is a .cmd shim.
+        const ext = process.platform === 'win32' ? path.extname(opencodePath).toLowerCase() : '';
+        if (process.platform === 'win32' && (ext === '.cmd' || ext === '.bat')) {
+          const npmDir = path.dirname(opencodePath);
+          const nodeEntrypoint = path.join(npmDir, 'node_modules', 'opencode-ai', 'bin', 'opencode');
+          if (fs.existsSync(nodeEntrypoint)) {
+            execFile(process.execPath, [nodeEntrypoint, ...args], { windowsHide: true }, (err) => {
+              if (err) reject(err);
+              else resolve();
+            });
+            return;
+          }
+        }
+
+        execFile(opencodePath, args, { windowsHide: true }, (err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
+
+      // If this succeeds, user is logged in (or no auth needed).
+      await run(['models']);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      // If OpenCode requires auth, explain how to fix.
+      if (/unauthorized/i.test(msg)) {
+        throw new Error(
+          'OpenCode is not authenticated (Unauthorized). Run `opencode auth` in a terminal to sign in, then try again.'
+        );
+      }
+      // Otherwise, don't block connection — session/new may still fail for other reasons.
+    }
+  }
+
   async loadSession(sessionId: string): Promise<boolean> {
     try {
       const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
@@ -514,7 +716,7 @@ export class AcpClient {
         mcpServers: []
       };
 
-      const response = await this.sendRequest<LoadSessionResponse>(ACP_METHODS.sessionLoad, request);
+      const response = await this.sendRequest<LoadSessionResponse>(ACP_METHODS.sessionLoad, request, 120000);
 
       this.currentSessionId = sessionId;
       this.sessionMetadata.modes = response.modes || null;
@@ -533,7 +735,11 @@ export class AcpClient {
       prompt: [{ type: 'text', text: content }]
     };
 
-    const response = await this.sendRequest<PromptResponse>(ACP_METHODS.sessionPrompt, request);
+    const response = await this.sendRequest<PromptResponse>(
+      ACP_METHODS.sessionPrompt,
+      request,
+      AcpClient.PROMPT_TIMEOUT_MS
+    );
 
     // Response comes via session/update notifications, so we just check for errors
     if (response.stopReason === 'error') {

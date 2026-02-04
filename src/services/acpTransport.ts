@@ -40,7 +40,7 @@ export class AcpTransport {
   private pendingRequests = new Map<string | number, {
     resolve: (value: JsonRpcResponse) => void;
     reject: (reason: Error) => void;
-    timeout: NodeJS.Timeout;
+    timeout?: NodeJS.Timeout;
   }>();
   private requestId = 0;
   private requestHandler: RequestHandler;
@@ -48,6 +48,16 @@ export class AcpTransport {
   private options: AcpTransportOptions;
   private isConnected = false;
   private writeQueue: Promise<void> = Promise.resolve();
+
+  private failAllPendingRequests(error: Error): void {
+    this.pendingRequests.forEach((request) => {
+      if (request.timeout) {
+        clearTimeout(request.timeout);
+      }
+      request.reject(error);
+    });
+    this.pendingRequests.clear();
+  }
 
   constructor(
     requestHandler: RequestHandler,
@@ -102,12 +112,14 @@ export class AcpTransport {
       process.on('exit', (code) => {
         ErrorHandler.debug(`ACP process exited with code ${code}`);
         this.isConnected = false;
+        this.failAllPendingRequests(new Error(`ACP process exited with code ${code}`));
         this.options.onDisconnect?.();
       });
 
       process.on('error', (error) => {
         ErrorHandler.handle(error, 'ACP transport error', false);
         this.isConnected = false;
+        this.failAllPendingRequests(error);
         this.options.onError?.(error);
       });
 
@@ -152,7 +164,9 @@ export class AcpTransport {
       if (message.id !== undefined && this.pendingRequests.has(message.id)) {
         const request = this.pendingRequests.get(message.id);
         if (request) {
-          clearTimeout(request.timeout);
+          if (request.timeout) {
+            clearTimeout(request.timeout);
+          }
           this.pendingRequests.delete(message.id);
           
           if (message.error) {
@@ -219,7 +233,7 @@ export class AcpTransport {
     }
   }
 
-  async sendRequest(method: string, params: unknown): Promise<JsonRpcResponse> {
+  async sendRequest(method: string, params: unknown, timeoutMs?: number | null): Promise<JsonRpcResponse> {
     if (!this.isConnected || !this.process || this.process.killed) {
       throw new Error('Transport not connected');
     }
@@ -232,16 +246,28 @@ export class AcpTransport {
       params
     };
 
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.pendingRequests.delete(id);
-        reject(new Error(`Request ${id} timed out after ${this.options.timeoutMs}ms`));
-      }, this.options.timeoutMs);
+    const effectiveTimeoutMs = timeoutMs === undefined ? this.options.timeoutMs : timeoutMs;
 
-      this.pendingRequests.set(id, { resolve, reject, timeout });
+    return new Promise((resolve, reject) => {
+      const pending: { resolve: (value: JsonRpcResponse) => void; reject: (reason: Error) => void; timeout?: NodeJS.Timeout } = {
+        resolve,
+        reject
+      };
+
+      if (effectiveTimeoutMs !== null) {
+        const timeout = setTimeout(() => {
+          this.pendingRequests.delete(id);
+          reject(new Error(`Request ${id} timed out after ${effectiveTimeoutMs}ms`));
+        }, effectiveTimeoutMs);
+        pending.timeout = timeout;
+      }
+
+      this.pendingRequests.set(id, pending);
 
       this.sendRaw(request).catch((error) => {
-        clearTimeout(timeout);
+        if (pending.timeout) {
+          clearTimeout(pending.timeout);
+        }
         this.pendingRequests.delete(id);
         reject(error);
       });
@@ -295,7 +321,9 @@ export class AcpTransport {
     
     // Reject all pending requests
     this.pendingRequests.forEach(request => {
-      clearTimeout(request.timeout);
+      if (request.timeout) {
+        clearTimeout(request.timeout);
+      }
       request.reject(new Error('Transport disposed'));
     });
     this.pendingRequests.clear();

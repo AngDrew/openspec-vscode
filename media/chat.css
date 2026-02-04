@@ -498,6 +498,11 @@ body {
   background-color: var(--chat-toolbar-hover);
 }
 
+.clear-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* Messages Container */
 .messages-container {
   flex: 1;
@@ -994,7 +999,7 @@ body {
   transition: background-color 0.2s ease, transform 0.1s ease;
   flex-shrink: 0;
   height: 40px;
-  width: 40px;
+  min-width: 72px;
 }
 
 .send-button:hover {
@@ -1072,28 +1077,6 @@ body {
   font-style: italic;
 }
 
-.cancel-button {
-  margin-left: 12px;
-  padding: 4px 12px;
-  background-color: var(--chat-error-bg);
-  color: var(--chat-error);
-  border: 1px solid var(--chat-error-border);
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 11px;
-  font-weight: 500;
-  transition: background-color 0.2s ease, opacity 0.2s ease;
-}
-
-.cancel-button:hover {
-  background-color: var(--chat-error);
-  color: var(--chat-bg);
-  opacity: 0.9;
-}
-
-.cancel-button:active {
-  transform: translateY(1px);
-}
 
 /* Partial Response Styling */
 .message.partial {
