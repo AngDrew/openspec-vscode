@@ -1,11 +1,19 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "agent": {
-    // "build": {
-    //   "model": "opencode/kimi-k2.5-free"
-    // },
-    // "plan": {
-    //   "model": "opencode/kimi-k2.5-free"
-    // }
+    "build": {
+      "model": "proxy/gpt-5.2-codex-high"
+      // "model": "opencode/kimi-k2.5-free"
+    },
+    "plan": {
+      "model": "proxy/gpt-5.2-high"
+    },
+    "explore": {
+      // "model": "proxy/gemini-3-flash-preview"
+      "model": "proxy/gpt-5.2-low"
+    },
+    "general": {
+      "model": "proxy/gpt-5.2-medium"
+    }
   },
 }
