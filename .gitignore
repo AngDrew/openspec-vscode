@@ -85,3 +85,7 @@ temp/
 .dynamodb/
 
 .vscode-test
+
+# Prevent committing compiled test artifacts
+test/**/*.js
+test/**/*.map

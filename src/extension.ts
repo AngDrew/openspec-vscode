@@ -7,7 +7,6 @@ import { CacheManager } from './utils/cache';
 import { activateExtension } from './extension/activate';
 import { deactivateExtension } from './extension/deactivate';
 import { registerCommands } from './extension/commands';
-import { checkWorkspaceInitialization } from './extension/watcher';
 import { ExtensionRuntimeState } from './extension/runtime';
 
 let runtime: ExtensionRuntimeState | undefined;
@@ -69,12 +68,6 @@ export async function activate(context: vscode.ExtensionContext) {
       }
     })
   );
-
-  // Set initial context to false for any legacy flags
-  vscode.commands.executeCommand('setContext', 'openspec:initialized', false);
-
-  // Keep compatibility with any features that rely on initialization state
-  checkWorkspaceInitialization(runtime);
 
   // Log activation success
   ErrorHandler.info('Extension activated successfully', false);

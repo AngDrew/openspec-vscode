@@ -57,22 +57,6 @@
       {
         "command": "openspec.chat.cancelStreaming",
         "title": "OpenSpec: Cancel Streaming"
-      },
-      {
-        "command": "openspec.chat.newChange",
-        "title": "OpenSpec: New Change (Chat)"
-      },
-      {
-        "command": "openspec.chat.fastForward",
-        "title": "OpenSpec: Fast Forward (Chat)"
-      },
-      {
-        "command": "openspec.chat.apply",
-        "title": "OpenSpec: Apply Change (Chat)"
-      },
-      {
-        "command": "openspec.chat.archive",
-        "title": "OpenSpec: Archive Change (Chat)"
       }
     ],
     "keybindings": [

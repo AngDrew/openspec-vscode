@@ -3,12 +3,6 @@ import { ExtensionRuntimeState } from './runtime';
 
 export function deactivateExtension(runtime?: ExtensionRuntimeState) {
   try {
-    runtime?.debounceMap.forEach(timeout => clearTimeout(timeout));
-    runtime?.debounceMap.clear();
-
-    if (runtime?.fileWatcher) {
-      runtime.fileWatcher.dispose();
-    }
     if (runtime?.cacheManager) {
       runtime.cacheManager.dispose();
     }

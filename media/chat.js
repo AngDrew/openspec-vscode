@@ -635,6 +635,39 @@
     scrollToBottom();
   }
 
+  function resolveArtifactFilepath(artifact) {
+    if (!artifact) {
+      return '';
+    }
+    if (typeof artifact.filepath === 'string' && artifact.filepath.trim()) {
+      return artifact.filepath.trim();
+    }
+    if (!artifact.changeId || !artifact.type) {
+      return '';
+    }
+
+    switch (artifact.type) {
+      case 'proposal':
+        return `openspec/changes/${artifact.changeId}/proposal.md`;
+      case 'design':
+        return `openspec/changes/${artifact.changeId}/design.md`;
+      case 'tasks':
+        return `openspec/changes/${artifact.changeId}/tasks.md`;
+      default:
+        return '';
+    }
+  }
+
+  function resolveSpecFilepath(spec, changeId) {
+    if (spec && typeof spec.filepath === 'string' && spec.filepath.trim()) {
+      return spec.filepath.trim();
+    }
+    if (!spec || !changeId || !spec.fileName) {
+      return '';
+    }
+    return `openspec/changes/${changeId}/specs/${spec.fileName}`;
+  }
+
   // Create artifact element
   function createArtifactElement(artifact) {
     const el = document.createElement('div');
@@ -708,10 +741,13 @@
           viewFullBtn.className = 'artifact-view-full-btn';
           viewFullBtn.textContent = 'View Full Document';
           viewFullBtn.addEventListener('click', () => {
+            const filepath = resolveArtifactFilepath(artifact);
+            if (!filepath) {
+              return;
+            }
             vscode.postMessage({
               type: 'openArtifact',
-              artifactType: artifact.type,
-              changeId: artifact.changeId
+              filepath
             });
           });
 
@@ -745,10 +781,13 @@
     openLink.textContent = 'Open in Editor';
     openLink.addEventListener('click', (e) => {
       e.preventDefault();
+      const filepath = resolveArtifactFilepath(artifact);
+      if (!filepath) {
+        return;
+      }
       vscode.postMessage({
         type: 'openArtifact',
-        artifactType: artifact.type,
-        changeId: artifact.changeId
+        filepath
       });
     });
 
@@ -904,11 +943,13 @@
       openBtn.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
+        const filepath = resolveSpecFilepath(spec, changeId);
+        if (!filepath) {
+          return;
+        }
         vscode.postMessage({
           type: 'openArtifact',
-          artifactType: 'specs',
-          changeId: changeId,
-          fileName: spec.fileName
+          filepath
         });
       });
       content.appendChild(openBtn);
@@ -1346,7 +1387,7 @@
       await loadScript('/node_modules/highlight.js/lib/core.js');
 
       // Load language definitions
-      await loadScript('/media/highlight-languages.js');
+      await loadScript('highlight-languages.js');
 
       highlightJsLoaded = true;
       highlightJsLoading = false;

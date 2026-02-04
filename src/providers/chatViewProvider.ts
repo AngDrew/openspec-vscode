@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { ErrorHandler } from '../utils/errorHandler';
 import { SessionManager } from '../services/sessionManager';
 import { AcpClient } from '../services/acpClient';
@@ -443,6 +444,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             case 'selectModel':
               await this._handleSelectModel(message.modelId);
               break;
+            case 'openArtifact':
+              await this._handleOpenArtifact(message);
+              break;
             default:
               ErrorHandler.debug(`Unknown message type: ${message.type}`);
           }
@@ -458,6 +462,88 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       null,
       this._disposables
     );
+  }
+
+  private async _handleOpenArtifact(message: unknown): Promise<void> {
+    try {
+      if (!message || typeof message !== 'object') {
+        return;
+      }
+
+      const payload = message as {
+        filepath?: unknown;
+        preview?: unknown;
+        artifactType?: unknown;
+        changeId?: unknown;
+        fileName?: unknown;
+      };
+
+      let filepath = typeof payload.filepath === 'string' ? payload.filepath.trim() : '';
+
+      // Backwards-compatible fallback: accept artifact selectors if a filepath wasn't provided.
+      if (!filepath) {
+        const artifactType = typeof payload.artifactType === 'string' ? payload.artifactType : '';
+        const changeId = typeof payload.changeId === 'string' ? payload.changeId : '';
+        const fileName = typeof payload.fileName === 'string' ? payload.fileName : '';
+
+        if (artifactType && changeId) {
+          switch (artifactType) {
+            case 'proposal':
+              filepath = `openspec/changes/${changeId}/proposal.md`;
+              break;
+            case 'design':
+              filepath = `openspec/changes/${changeId}/design.md`;
+              break;
+            case 'tasks':
+              filepath = `openspec/changes/${changeId}/tasks.md`;
+              break;
+            case 'specs':
+            case 'spec':
+              if (fileName) {
+                filepath = `openspec/changes/${changeId}/specs/${fileName}`;
+              }
+              break;
+            default:
+              break;
+          }
+        }
+      }
+
+      if (!filepath) {
+        return;
+      }
+
+      const preview = payload.preview === true;
+
+      const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+      if (!workspaceFolder) {
+        ErrorHandler.handle(new Error('No workspace folder is open'), 'opening artifact', true);
+        return;
+      }
+
+      const workspaceRoot = workspaceFolder.uri.fsPath;
+      const resolved = path.isAbsolute(filepath)
+        ? path.normalize(filepath)
+        : path.resolve(workspaceRoot, filepath);
+
+      // Do not allow the webview to open files outside the workspace root.
+      const relative = path.relative(workspaceRoot, resolved);
+      if (relative.startsWith('..') || path.isAbsolute(relative)) {
+        ErrorHandler.handle(
+          new Error(`Refusing to open file outside the workspace: ${filepath}`),
+          'opening artifact',
+          true
+        );
+        return;
+      }
+
+      const uri = vscode.Uri.file(resolved);
+      const document = await vscode.workspace.openTextDocument(uri);
+      await vscode.window.showTextDocument(document, { preview });
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      ErrorHandler.handle(err, 'opening artifact', true);
+    }
   }
 
   private async _handleSendMessage(content: string): Promise<void> {

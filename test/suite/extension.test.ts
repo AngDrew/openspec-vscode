@@ -5,11 +5,11 @@ suite('Extension Test Suite', () => {
   vscode.window.showInformationMessage('Start all tests.');
 
   test('Extension should be present', () => {
-    assert.ok(vscode.extensions.getExtension('openspec-vscode'));
+    assert.ok(vscode.extensions.getExtension('AngDrew.openspec-vscode-dev'));
   });
 
   test('Extension should activate', async () => {
-    const extension = vscode.extensions.getExtension('openspec-vscode');
+    const extension = vscode.extensions.getExtension('AngDrew.openspec-vscode-dev');
     if (extension) {
       await extension.activate();
       assert.ok(true);
@@ -22,11 +22,9 @@ suite('Extension Test Suite', () => {
     const commands = await vscode.commands.getCommands();
     
     const expectedCommands = [
-      'openspec.viewDetails',
-      'openspec.listChanges',
-      'openspec.generateProposal',
-      'openspec.init',
-      'openspec.showOutput'
+      'openspec.chat.open',
+      'openspec.chat.messageSent',
+      'openspec.chat.cancelStreaming'
     ];
 
     expectedCommands.forEach(command => {
