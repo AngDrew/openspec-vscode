@@ -179,6 +179,41 @@ export class AcpClient {
     return this.config.opencodePath;
   }
 
+  private resolveDefaultOpencodeConfigPath(): string | undefined {
+    const configDir = path.join(os.homedir(), '.config', 'opencode');
+    const candidates = [
+      path.join(configDir, 'opencode.json'),
+      path.join(configDir, 'opencode.jsonc')
+    ];
+
+    for (const candidate of candidates) {
+      try {
+        if (fs.existsSync(candidate)) {
+          return candidate;
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    return undefined;
+  }
+
+  private buildOpencodeEnv(): NodeJS.ProcessEnv {
+    const env = { ...process.env };
+
+    if (env.OPENCODE_CONFIG || env.OPENCODE_CONFIG_DIR || env.OPENCODE_CONFIG_CONTENT) {
+      return env;
+    }
+
+    const defaultConfigPath = this.resolveDefaultOpencodeConfigPath();
+    if (defaultConfigPath) {
+      env.OPENCODE_CONFIG = defaultConfigPath;
+    }
+
+    return env;
+  }
+
   static getInstance(): AcpClient {
     if (!AcpClient.instance) {
       AcpClient.instance = new AcpClient();
@@ -333,10 +368,12 @@ export class AcpClient {
     // Start opencode acp without --print-logs to avoid stdout pollution
     // On Windows, PATH resolution differs between shells and VS Code.
     // If this fails with ENOENT, the OpenCode CLI is not available to the extension host.
+    const env = this.buildOpencodeEnv();
     this.acpProcess = spawn(command, args, {
       cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
-      shell
+      shell,
+      env
     });
 
     // Wait until the process is actually spawned, otherwise we'll race with setup.
@@ -667,6 +704,7 @@ export class AcpClient {
     try {
       const { execFile } = await import('child_process');
       const opencodePath = this.config.opencodePath || 'opencode';
+      const env = this.buildOpencodeEnv();
 
       const run = (args: string[]) => new Promise<void>((resolve, reject) => {
         // Try to run via node entrypoint on Windows if configured path is a .cmd shim.
@@ -675,7 +713,7 @@ export class AcpClient {
           const npmDir = path.dirname(opencodePath);
           const nodeEntrypoint = path.join(npmDir, 'node_modules', 'opencode-ai', 'bin', 'opencode');
           if (fs.existsSync(nodeEntrypoint)) {
-            execFile(process.execPath, [nodeEntrypoint, ...args], { windowsHide: true }, (err) => {
+            execFile(process.execPath, [nodeEntrypoint, ...args], { windowsHide: true, env }, (err) => {
               if (err) reject(err);
               else resolve();
             });
@@ -683,7 +721,7 @@ export class AcpClient {
           }
         }
 
-        execFile(opencodePath, args, { windowsHide: true }, (err) => {
+        execFile(opencodePath, args, { windowsHide: true, env }, (err) => {
           if (err) reject(err);
           else resolve();
         });
