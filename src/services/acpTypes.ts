@@ -1,6 +1,8 @@
 // ACP Protocol Types - Aligned with Agent Client Protocol v1
 // See: https://agentclientprotocol.com/
 
+export type AcpConnectionState = 'disconnected' | 'connecting' | 'connected';
+
 export interface InitializeRequest {
   protocolVersion: number;
   clientCapabilities: ClientCapabilities;

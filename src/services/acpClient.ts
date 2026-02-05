@@ -15,7 +15,7 @@ import {
   TerminalOutputRequest, TerminalOutputResponse, WaitForTerminalExitRequest,
   WaitForTerminalExitResponse, KillTerminalCommandRequest, KillTerminalCommandResponse,
   ReleaseTerminalRequest, ReleaseTerminalResponse, ToolCall, AcpMessage,
-  AcpConnectionConfig, OfflineState, ACP_METHODS,
+  AcpConnectionConfig, AcpConnectionState, OfflineState, ACP_METHODS,
   AgentMessageChunkUpdate, ToolCallUpdate, ToolCallUpdateUpdate, PlanUpdate,
   AvailableCommandsUpdate, CurrentModeUpdate, AgentThoughtChunkUpdate,
   SessionModeState, SessionModelState, AvailableCommand
@@ -39,6 +39,7 @@ export class AcpClient {
   
   private isConnected = false;
   private isConnecting = false;
+  private connectionState: AcpConnectionState = 'disconnected';
   private currentSessionId: string | undefined;
   private sessionMetadata: {
     modes: SessionModeState | null;
@@ -47,7 +48,7 @@ export class AcpClient {
   } = { modes: null, models: null, commands: null };
   
   private messageListeners: Array<(message: AcpMessage) => void> = [];
-  private connectionListeners: Array<(connected: boolean) => void> = [];
+  private connectionListeners: Array<(state: AcpConnectionState) => void> = [];
    private toolCallListeners: Array<(toolCall: ToolCall) => void> = [];
   private sessionCreatedListeners: Array<(sessionId: string, changeId?: string) => void> = [];
   private offlineListeners: Array<(state: OfflineState) => void> = [];
@@ -420,6 +421,10 @@ export class AcpClient {
     return this.isConnected && !!this.transport?.isTransportConnected();
   }
 
+  getConnectionState(): AcpConnectionState {
+    return this.connectionState;
+  }
+
   async connect(): Promise<boolean> {
     if (this.isConnecting) {
       ErrorHandler.debug('Connection already in progress, waiting...');
@@ -428,15 +433,22 @@ export class AcpClient {
         await this.delay(100);
         attempts++;
       }
-      return this.isConnected;
+      if (this.isClientConnected()) {
+        this.updateConnectionState('connected');
+        return true;
+      }
+      this.updateConnectionState('disconnected');
+      return false;
     }
 
     if (this.isClientConnected()) {
+      this.updateConnectionState('connected');
       return true;
     }
 
     this.isConnecting = true;
     this.lastConnectionError = undefined;
+    this.updateConnectionState('connecting');
 
     try {
       // Refresh launch config from VS Code settings.
@@ -456,7 +468,7 @@ export class AcpClient {
             this.config.port = port;
             this.lastSuccessfulConnection = Date.now();
             this.updateOfflineState(false);
-            this.notifyConnectionListeners(true);
+            this.updateConnectionState('connected');
             ErrorHandler.debug(`Successfully connected to ACP server on port ${port}`);
             return true;
           }
@@ -482,10 +494,13 @@ export class AcpClient {
 
       this.isConnected = false;
       this.updateOfflineState(true);
-      this.notifyConnectionListeners(false);
+      this.updateConnectionState('disconnected');
       return false;
     } finally {
       this.isConnecting = false;
+      if (this.isClientConnected()) {
+        this.updateConnectionState('connected');
+      }
     }
   }
 
@@ -594,7 +609,7 @@ export class AcpClient {
         timeoutMs: this.config.timeoutMs,
         onDisconnect: () => {
           this.isConnected = false;
-          this.notifyConnectionListeners(false);
+          this.updateConnectionState('disconnected');
           this.scheduleReconnect();
         },
         onError: (error) => {
@@ -1211,9 +1226,9 @@ export class AcpClient {
     });
   }
 
-  onConnectionChange(listener: (connected: boolean) => void): vscode.Disposable {
+  onConnectionChange(listener: (state: AcpConnectionState) => void): vscode.Disposable {
     this.connectionListeners.push(listener);
-    listener(this.isClientConnected());
+    listener(this.connectionState);
     return new vscode.Disposable(() => {
       const index = this.connectionListeners.indexOf(listener);
       if (index > -1) {
@@ -1262,14 +1277,22 @@ export class AcpClient {
     });
   }
 
-  private notifyConnectionListeners(connected: boolean): void {
+  private notifyConnectionListeners(state: AcpConnectionState): void {
     this.connectionListeners.forEach(listener => {
       try {
-        listener(connected);
+        listener(state);
       } catch (error) {
         ErrorHandler.debug(`Error in connection listener: ${error}`);
       }
     });
+  }
+
+  private updateConnectionState(state: AcpConnectionState): void {
+    if (this.connectionState === state) {
+      return;
+    }
+    this.connectionState = state;
+    this.notifyConnectionListeners(state);
   }
 
   private notifyToolCallListeners(toolCall: ToolCall): void {

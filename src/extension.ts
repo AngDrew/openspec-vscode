@@ -46,6 +46,9 @@ export async function activate(context: vscode.ExtensionContext) {
   vscode.commands.executeCommand('setContext', 'openspec:chatFocus', false);
   vscode.commands.executeCommand('setContext', 'openspec:inputEmpty', true);
   vscode.commands.executeCommand('setContext', 'openspec:streaming', false);
+  if (runtime) {
+    runtime.autoStartServer = config.get('chat.autoStartServer', true);
+  }
 
   // Listen for configuration changes
   context.subscriptions.push(
@@ -53,6 +56,10 @@ export async function activate(context: vscode.ExtensionContext) {
       if (e.affectsConfiguration('openspec.chat.enabled')) {
         const config = vscode.workspace.getConfiguration('openspec');
         vscode.commands.executeCommand('setContext', 'openspec:chatEnabled', config.get('chat.enabled', true));
+      }
+      if (e.affectsConfiguration('openspec.chat.autoStartServer') && runtime) {
+        const config = vscode.workspace.getConfiguration('openspec');
+        runtime.autoStartServer = config.get('chat.autoStartServer', true);
       }
     })
   );

@@ -1,8 +1,8 @@
 ## 1. Wiring And State
 
-- [ ] 1.1 Read `openspec.chat.autoStartServer` setting and plumb it into activation and chat view lifecycle
-- [ ] 1.2 Add ACP connection state enum (disconnected/connecting/connected) and expose it to the chat webview
-- [ ] 1.3 Update chat webview rendering to display "Connecting" while ACP startup is in progress
+- [x] 1.1 Read `openspec.chat.autoStartServer` setting and plumb it into activation and chat view lifecycle
+- [x] 1.2 Add ACP connection state enum (disconnected/connecting/connected) and expose it to the chat webview
+- [x] 1.3 Update chat webview rendering to display "Connecting" while ACP startup is in progress
 
 ## 2. Auto-Start Behavior
 

@@ -4,7 +4,7 @@ import { ErrorHandler } from '../utils/errorHandler';
 import { SessionManager } from '../services/sessionManager';
 import { AcpClient } from '../services/acpClient';
 import { AcpClientCapabilities } from '../services/acpClientCapabilities';
-import { AcpMessage, ToolCall } from '../services/acpTypes';
+import { AcpConnectionState, AcpMessage, ToolCall } from '../services/acpTypes';
 
 export interface ChatMessage {
   id: string;
@@ -108,12 +108,27 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     // Send initial session metadata if available
     this._sendSessionMetadata();
 
-    this.setConnectionState(this._acpClient.isClientConnected());
+    this.setConnectionState(this._acpClient.getConnectionState());
 
-    // Update context when view is visible
+    const maybeAutoStart = () => {
+      const config = vscode.workspace.getConfiguration('openspec');
+      const autoStartEnabled = config.get('chat.autoStartServer', true);
+      if (!autoStartEnabled) {
+        return;
+      }
+      if (this._acpClient.getConnectionState() !== 'disconnected') {
+        return;
+      }
+      this._acpClient.connect().catch((error) => {
+        ErrorHandler.handle(error as Error, 'auto-starting ACP on chat open', false);
+      });
+    };
+
+    maybeAutoStart();
     webviewView.onDidChangeVisibility(() => {
       if (webviewView.visible) {
         vscode.commands.executeCommand('setContext', 'openspec:chatFocus', true);
+        maybeAutoStart();
       } else {
         vscode.commands.executeCommand('setContext', 'openspec:chatFocus', false);
       }
@@ -132,9 +147,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       this._handleAcpMessage(message);
     });
 
-    this._acpClient.onConnectionChange((connected) => {
-      this.setConnectionState(connected);
-      if (!connected) {
+    this._acpClient.onConnectionChange((state) => {
+      this.setConnectionState(state);
+      if (state === 'disconnected') {
         this.showConnectionError('Disconnected from OpenCode server', true);
       } else {
         this.hideConnectionError();
@@ -360,8 +375,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  public setConnectionState(connected: boolean): void {
-    const state = connected ? 'connected' : 'disconnected';
+  public setConnectionState(state: AcpConnectionState): void {
     this.postMessage({
       type: 'connectionState',
       state
@@ -853,6 +867,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     );
 
     const nonce = this._getNonce();
+    const initialConnectionState = this._acpClient.getConnectionState();
+    const connectionStateLabel = initialConnectionState === 'connected'
+      ? 'Connected'
+      : initialConnectionState === 'connecting'
+        ? 'Connecting'
+        : 'Disconnected';
 
     // For now, generate HTML inline
     return `<!DOCTYPE html>
@@ -888,7 +908,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           <div class="chat-header">
             <div class="chat-header-main">
               <h1>OpenSpec Chat</h1>
-              <span class="connection-status" id="connectionStatus">Disconnected</span>
+              <span class="connection-status" id="connectionStatus" data-state="${initialConnectionState}">${connectionStateLabel}</span>
             </div>
             <button class="clear-button" id="clearBtn" title="Start a new chat">New Chat</button>
           </div>
