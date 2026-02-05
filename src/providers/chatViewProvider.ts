@@ -161,6 +161,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
+  private _syncUiState(): void {
+    this.setConnectionState(this._acpClient.getConnectionState());
+    this.updateOfflineState(this._acpClient.getOfflineState());
+    this.setStreamingState(this._isWorking, this._activeStreamingMessageId);
+    this._sendSessionMetadata();
+  }
+
   private _handleAcpMessage(message: AcpMessage | { type: 'modeUpdate'; modeId?: string } | { type: 'modelUpdate'; modelId?: string }): void {
     switch (message.type) {
       case 'text':
@@ -380,9 +387,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   }
 
   public setConnectionState(state: AcpConnectionState): void {
+    const port = this._acpClient.getConfig().port;
     this.postMessage({
       type: 'connectionState',
-      state
+      state,
+      port: Number.isInteger(port) && port > 0 ? port : undefined
     });
   }
 
@@ -443,6 +452,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
                 type: 'sessionData',
                 session: this._session
               });
+              break;
+            case 'webviewReady':
+              this._syncUiState();
               break;
             case 'cancelStreaming':
               await this._handleCancelStreaming();
@@ -613,7 +625,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       }
 
       if (!sessionId) {
-        this.showConnectionError('OpenCode connected, but no session could be created. Check OpenCode auth (`opencode auth`) and default model configuration.', true);
+        const detail = this._acpClient.getLastSessionError();
+        this.showConnectionError(
+          detail || 'OpenCode connected, but no session could be created. Check OpenCode auth (`opencode auth`) and default model configuration.',
+          true
+        );
         return;
       }
 
@@ -730,8 +746,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
       const newAcpSessionId = await this._acpClient.createSession();
       if (!newAcpSessionId) {
+        const detail = this._acpClient.getLastSessionError();
         this.showConnectionError(
-          'OpenCode connected, but no session could be created. Check OpenCode auth (`opencode auth`) and default model configuration.',
+          detail || 'OpenCode connected, but no session could be created. Check OpenCode auth (`opencode auth`) and default model configuration.',
           true
         );
         return;

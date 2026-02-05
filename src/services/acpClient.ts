@@ -35,6 +35,8 @@ export class AcpClient {
   private static readonly OFFLINE_RETRY_INTERVAL = 30000;
   private static readonly DEFAULT_ACP_PORT = 4090;
   private static readonly MAX_ACP_PORT = 4999;
+  private static readonly CONFIG_HELP_MESSAGE =
+    'OpenCode ACP requires configuration. OpenCode config is located at ~/.config/opencode/opencode.json (or opencode.jsonc) on macOS and Linux, and %USERPROFILE%\\.config\\opencode\\opencode.json on Windows. Or pass a full OpenCode config blob via OPENCODE_CONFIG_CONTENT (example: OPENCODE_CONFIG_CONTENT=\'{"model":"anthropic/claude-3-7-sonnet"}\' opencode-acp).';
   private static instance: AcpClient;
   
   private config: AcpConnectionConfig;
@@ -65,6 +67,7 @@ export class AcpClient {
   private activeStreamMessageId: string | undefined;
   private currentResponseBuffer = '';
   private lastConnectionError: string | undefined;
+  private lastSessionError: string | undefined;
   private lastAcpStderr: string | undefined;
   private acpStderrLines: string[] = [];
   
@@ -94,6 +97,10 @@ export class AcpClient {
 
   getLastConnectionError(): string | undefined {
     return this.lastConnectionError;
+  }
+
+  getLastSessionError(): string | undefined {
+    return this.lastSessionError;
   }
 
   private resolveOpencodePathFromSettings(): void {
@@ -615,10 +622,35 @@ export class AcpClient {
       : singleLine;
   }
 
+  private isConfigMissingMessage(message: string | undefined): boolean {
+    if (!message) {
+      return false;
+    }
+    const lower = message.toLowerCase();
+    if (!(lower.includes('config') || lower.includes('configuration'))) {
+      return false;
+    }
+    return lower.includes('opencode') || lower.includes('opencode.json') || lower.includes('opencode_config');
+  }
+
   private formatConnectionError(error: Error): string {
     const message = this.lastAcpStderr
       ? `OpenCode startup failed: ${this.lastAcpStderr}`
       : (error.message || 'Failed to start OpenCode');
+    if (this.isConfigMissingMessage(message)) {
+      return AcpClient.CONFIG_HELP_MESSAGE;
+    }
+    return this.summarizeErrorMessage(message);
+  }
+
+  private formatSessionError(error: unknown): string {
+    const message = error instanceof Error ? error.message : String(error);
+    if (this.isConfigMissingMessage(message)) {
+      return AcpClient.CONFIG_HELP_MESSAGE;
+    }
+    if (!message) {
+      return 'OpenCode session creation failed.';
+    }
     return this.summarizeErrorMessage(message);
   }
 
@@ -974,6 +1006,7 @@ export class AcpClient {
   }
 
   async createSession(): Promise<string | undefined> {
+    this.lastSessionError = undefined;
     try {
       // Ensure we have auth/model config; otherwise session/new will fail.
       // This keeps the client "connected" but surfaces a clear error.
@@ -1002,8 +1035,11 @@ export class AcpClient {
 
       this.notifySessionCreatedListeners(response.sessionId);
 
+      this.lastSessionError = undefined;
+
       return response.sessionId;
     } catch (error) {
+      this.lastSessionError = this.formatSessionError(error);
       ErrorHandler.handle(error as Error, 'creating ACP session', false);
       return undefined;
     }

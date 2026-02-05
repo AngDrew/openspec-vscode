@@ -32,7 +32,11 @@ export async function activate(context: vscode.ExtensionContext) {
   try {
     const chatViewProvider = new ChatViewProvider(context.extensionUri);
     context.subscriptions.push(
-      vscode.window.registerWebviewViewProvider(ChatViewProvider.viewType, chatViewProvider)
+      vscode.window.registerWebviewViewProvider(ChatViewProvider.viewType, chatViewProvider, {
+        webviewOptions: {
+          retainContextWhenHidden: true
+        }
+      })
     );
     runtime.chatProvider = chatViewProvider as unknown as typeof runtime.chatProvider;
     ErrorHandler.debug('Chat view provider registered successfully');

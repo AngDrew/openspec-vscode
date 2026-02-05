@@ -76,7 +76,6 @@
     setupEventListeners();
     requestSessionData();
     focusInput();
-    updateConnectionStatus('disconnected');
     updateWorkingUi();
   }
 
@@ -106,6 +105,7 @@
 
     // Listen for messages from extension
     window.addEventListener('message', handleExtensionMessage);
+    vscode.postMessage({ type: 'webviewReady' });
 
     // Track user scrolling to prevent auto-scroll when user is reading history
     messagesContainer.addEventListener('scroll', handleScroll);
