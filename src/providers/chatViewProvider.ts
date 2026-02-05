@@ -150,7 +150,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     this._acpClient.onConnectionChange((state) => {
       this.setConnectionState(state);
       if (state === 'disconnected') {
-        this.showConnectionError('Disconnected from OpenCode server', true);
+        const detail = this._acpClient.getLastConnectionError();
+        this.showConnectionError(
+          detail ? `Failed to connect to OpenCode: ${detail}` : 'Disconnected from OpenCode server',
+          true
+        );
       } else {
         this.hideConnectionError();
       }
@@ -714,6 +718,25 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         // Ignore
       }
 
+      const connected = await this._acpClient.connect();
+      if (!connected) {
+        const detail = this._acpClient.getLastConnectionError();
+        this.showConnectionError(
+          detail ? `Failed to connect to OpenCode: ${detail}` : 'Failed to connect to OpenCode server',
+          true
+        );
+        return;
+      }
+
+      const newAcpSessionId = await this._acpClient.createSession();
+      if (!newAcpSessionId) {
+        this.showConnectionError(
+          'OpenCode connected, but no session could be created. Check OpenCode auth (`opencode auth`) and default model configuration.',
+          true
+        );
+        return;
+      }
+
       // Reset local chat state
       this._session = this._createNewSession();
       this._streamingBuffers.clear();
@@ -728,23 +751,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       await this._sessionManager.createSession(undefined, 'New chat');
 
       // Reset ACP session (fresh model context)
-      this._acpClient.clearSession();
       await this._sessionManager.clearAcpSessionId();
-
-      // Best-effort: create a fresh ACP session immediately so selectors reflect it.
-      try {
-        if (!this._acpClient.isClientConnected()) {
-          await this._acpClient.connect();
-        }
-        const newAcpSessionId = await this._acpClient.createSession();
-        if (newAcpSessionId) {
-          await this._sessionManager.setAcpSessionId(newAcpSessionId);
-        }
-      } catch {
-        // If session creation fails, we will retry on next message send.
-      }
+      await this._sessionManager.setAcpSessionId(newAcpSessionId);
 
       this._sendSessionMetadata();
+      this.hideConnectionError();
     } catch (error) {
       ErrorHandler.handle(error as Error, 'starting new chat session', false);
       this.postMessage({

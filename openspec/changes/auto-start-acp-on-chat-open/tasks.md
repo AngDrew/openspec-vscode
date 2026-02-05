@@ -6,20 +6,20 @@
 
 ## 2. Auto-Start Behavior
 
-- [ ] 2.1 On extension activation (with workspace), if auto-start enabled, attempt to start/connect ACP
-- [ ] 2.2 On chat view resolve/visibility, if auto-start enabled and ACP is disconnected, attempt to start/connect ACP (fallback)
-- [ ] 2.3 Capture `opencode acp` stderr and surface a concise error banner in the chat UI when startup fails
+- [x] 2.1 On extension activation (with workspace), if auto-start enabled, attempt to start/connect ACP
+- [x] 2.2 On chat view resolve/visibility, if auto-start enabled and ACP is disconnected, attempt to start/connect ACP (fallback)
+- [x] 2.3 Capture `opencode acp` stderr and surface a concise error banner in the chat UI when startup fails
 
 ## 3. Port Strategy
 
-- [ ] 3.1 Implement deterministic port selection for `opencode acp`: try 4090, then 4091, 4092, ... until success
-- [ ] 3.2 Persist last successful port and attempt it first on subsequent reconnects
-- [ ] 3.3 Ensure port selection supports multiple concurrent workspaces without collisions
+- [x] 3.1 Implement deterministic port selection for `opencode acp`: try 4090, then 4091, 4092, ... until success
+- [x] 3.2 Persist last successful port and attempt it first on subsequent reconnects
+- [x] 3.3 Ensure port selection supports multiple concurrent workspaces without collisions
 
 ## 4. New Chat Reliability
 
-- [ ] 4.1 Make "New Chat" always create a new ACP session when connected
-- [ ] 4.2 If session creation fails, show an error banner and keep the current session intact (no silent failures)
+- [x] 4.1 Make "New Chat" always create a new ACP session when connected
+- [x] 4.2 If session creation fails, show an error banner and keep the current session intact (no silent failures)
 
 ## 5. Verification
 

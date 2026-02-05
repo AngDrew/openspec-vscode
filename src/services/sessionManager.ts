@@ -25,6 +25,7 @@ export interface SessionInfo {
   updatedAt: number;
   messageCount: number;
   acpSessionId?: string;
+  acpPort?: number;
   // Enhanced metadata tracking
   metadata?: {
     lastActivityAt: number;
@@ -47,6 +48,7 @@ export interface ConversationSession {
   updatedAt: number;
   metadata?: {
     sessionId?: string;
+    acpPort?: number;
     extraPrompt?: string;
     // Enhanced session metadata tracking
     lastActivityAt?: number;
@@ -70,6 +72,7 @@ export class SessionManager {
   private static readonly CURRENT_SESSION_KEY = 'openspec.chat.currentSession';
   private static readonly ACTIVE_SESSIONS_KEY = 'openspec.chat.activeSessions';
   private static readonly WORKSPACE_ACP_SESSION_KEY = 'openspec.workspace.acpSessionId';
+  private static readonly WORKSPACE_ACP_PORT_KEY = 'openspec.workspace.acpPort';
   private static readonly COMPRESSION_THRESHOLD = 1024; // Compress messages larger than 1KB
   private static readonly MAX_SESSIONS = 50; // Maximum number of sessions to keep in history
   private static readonly MAX_CONCURRENT_SESSIONS = 10; // Maximum number of concurrent active sessions per workspace
@@ -322,6 +325,50 @@ export class SessionManager {
     }
 
     ErrorHandler.debug(`Set ACP session ID to: ${acpSessionId}`);
+  }
+
+  async setAcpServerPort(port: number): Promise<void> {
+    if (!Number.isInteger(port) || port <= 0) {
+      return;
+    }
+
+    const session = await this.getOrCreateSession();
+    session.metadata = session.metadata || {};
+    session.metadata.acpPort = port;
+    session.updatedAt = Date.now();
+
+    await this.saveCurrentSession();
+    await this.updateSessionInHistory(session);
+
+    if (this.context) {
+      await this.context.workspaceState.update(SessionManager.WORKSPACE_ACP_PORT_KEY, port);
+      ErrorHandler.debug(`Stored ACP server port in workspace state: ${port}`);
+    }
+
+    ErrorHandler.debug(`Set ACP server port to: ${port}`);
+  }
+
+  async getAcpServerPort(): Promise<number | undefined> {
+    const session = await this.getCurrentSession();
+    const storedInSession = session?.metadata?.acpPort;
+    if (typeof storedInSession === 'number' && Number.isInteger(storedInSession) && storedInSession > 0) {
+      return storedInSession;
+    }
+
+    if (this.context) {
+      const storedPort = this.context.workspaceState.get<number>(SessionManager.WORKSPACE_ACP_PORT_KEY);
+      if (typeof storedPort === 'number' && Number.isInteger(storedPort) && storedPort > 0) {
+        if (session) {
+          session.metadata = session.metadata || {};
+          session.metadata.acpPort = storedPort;
+          await this.saveCurrentSession();
+          await this.updateSessionInHistory(session);
+        }
+        return storedPort;
+      }
+    }
+
+    return undefined;
   }
 
   async getAcpSessionId(): Promise<string | undefined> {
@@ -852,6 +899,7 @@ export class SessionManager {
       updatedAt: session.updatedAt,
       messageCount: session.messages.length,
       acpSessionId: session.metadata?.sessionId,
+      acpPort: session.metadata?.acpPort,
       metadata: {
         lastActivityAt: session.metadata?.lastActivityAt || session.updatedAt,
         totalMessages: session.metadata?.totalMessages || session.messages.length,
@@ -884,6 +932,7 @@ export class SessionManager {
         updatedAt: session.updatedAt,
         messageCount: session.messages.length,
         acpSessionId: session.metadata?.sessionId,
+        acpPort: session.metadata?.acpPort,
         metadata: {
           lastActivityAt: session.metadata?.lastActivityAt || session.updatedAt,
           totalMessages: session.metadata?.totalMessages || session.messages.length,

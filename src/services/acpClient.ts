@@ -4,6 +4,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { ErrorHandler } from '../utils/errorHandler';
+import { WorkspaceUtils } from '../utils/workspace';
+import { SessionManager } from './sessionManager';
 import { AcpTransport } from './acpTransport';
 import {
   InitializeRequest, InitializeResponse, NewSessionRequest, NewSessionResponse,
@@ -31,11 +33,14 @@ export class AcpClient {
   private static readonly DEFAULT_HOST = '127.0.0.1';
   private static readonly MAX_QUEUED_MESSAGES = 50;
   private static readonly OFFLINE_RETRY_INTERVAL = 30000;
+  private static readonly DEFAULT_ACP_PORT = 4090;
+  private static readonly MAX_ACP_PORT = 4999;
   private static instance: AcpClient;
   
   private config: AcpConnectionConfig;
   private transport: AcpTransport | undefined;
   private acpProcess: ChildProcess | undefined;
+  private sessionManager: SessionManager;
   
   private isConnected = false;
   private isConnecting = false;
@@ -60,6 +65,8 @@ export class AcpClient {
   private activeStreamMessageId: string | undefined;
   private currentResponseBuffer = '';
   private lastConnectionError: string | undefined;
+  private lastAcpStderr: string | undefined;
+  private acpStderrLines: string[] = [];
   
   // Client capability handlers
   private readTextFileHandler: ((params: ReadTextFileRequest) => Promise<ReadTextFileResponse>) | null = null;
@@ -72,6 +79,7 @@ export class AcpClient {
   private releaseTerminalHandler: ((params: ReleaseTerminalRequest) => Promise<ReleaseTerminalResponse>) | null = null;
 
   private constructor() {
+    this.sessionManager = SessionManager.getInstance();
     this.config = {
       host: AcpClient.DEFAULT_HOST,
       // ACP uses stdio; the HTTP port is not required for the extension.
@@ -448,6 +456,7 @@ export class AcpClient {
 
     this.isConnecting = true;
     this.lastConnectionError = undefined;
+    this.resetAcpStderr();
     this.updateConnectionState('connecting');
 
     try {
@@ -455,39 +464,56 @@ export class AcpClient {
       this.resolveOpencodePathFromSettings();
       this.config.opencodePath = this.detectOpencodePath() || this.config.opencodePath;
 
-      const port = this.config.port;
-      
-      for (let attempt = 1; attempt <= this.config.retryAttempts; attempt++) {
-        try {
-          ErrorHandler.debug(`Connecting to ACP server (attempt ${attempt}/${this.config.retryAttempts})...`);
+      const ports = await this.buildPortCandidates();
 
-          const connected = await this.tryConnect(port);
+      portLoop: for (const port of ports) {
+        if (await this.isPortInUse(port)) {
+          ErrorHandler.debug(`Port ${port} is already in use, trying next port.`);
+          continue;
+        }
 
-          if (connected) {
-            this.isConnected = true;
-            this.config.port = port;
-            this.lastSuccessfulConnection = Date.now();
-            this.updateOfflineState(false);
-            this.updateConnectionState('connected');
-            ErrorHandler.debug(`Successfully connected to ACP server on port ${port}`);
-            return true;
-          }
-        } catch (error) {
-          const err = error instanceof Error ? error : new Error(String(error));
-          this.lastConnectionError = err.message;
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          ErrorHandler.debug(`Connection attempt ${attempt} failed: ${errorMessage}`);
+        for (let attempt = 1; attempt <= this.config.retryAttempts; attempt++) {
+          try {
+            this.resetAcpStderr();
+            ErrorHandler.debug(
+              `Connecting to ACP server on port ${port} (attempt ${attempt}/${this.config.retryAttempts})...`
+            );
 
-          // If the CLI is missing, retries won't help.
-          const anyErr = error as unknown as { code?: unknown };
-          if (anyErr && (anyErr.code === 'ENOENT' || /\bENOENT\b/.test(errorMessage))) {
-            break;
-          }
+            const connected = await this.tryConnect(port);
 
-          if (attempt < this.config.retryAttempts) {
-            const delay = this.calculateBackoffDelay(attempt);
-            ErrorHandler.debug(`Retrying in ${delay}ms...`);
-            await this.delay(delay);
+            if (connected) {
+              this.isConnected = true;
+              this.config.port = port;
+              this.lastSuccessfulConnection = Date.now();
+              this.updateOfflineState(false);
+              this.updateConnectionState('connected');
+              await this.sessionManager.setAcpServerPort(port);
+              ErrorHandler.debug(`Successfully connected to ACP server on port ${port}`);
+              return true;
+            }
+          } catch (error) {
+            const err = error instanceof Error ? error : new Error(String(error));
+            const rawMessage = err.message;
+            const formattedMessage = this.formatConnectionError(err);
+            this.lastConnectionError = formattedMessage;
+            ErrorHandler.debug(`Connection attempt ${attempt} failed: ${formattedMessage}`);
+
+            // If the CLI is missing, retries won't help.
+            const anyErr = error as unknown as { code?: unknown };
+            if (anyErr && (anyErr.code === 'ENOENT' || /\bENOENT\b/.test(rawMessage))) {
+              return false;
+            }
+
+            if (await this.isPortInUse(port)) {
+              ErrorHandler.debug(`Port ${port} became unavailable, trying next port.`);
+              continue portLoop;
+            }
+
+            if (attempt < this.config.retryAttempts) {
+              const delay = this.calculateBackoffDelay(attempt);
+              ErrorHandler.debug(`Retrying in ${delay}ms...`);
+              await this.delay(delay);
+            }
           }
         }
       }
@@ -514,6 +540,86 @@ export class AcpClient {
 
   private delay(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  private resetAcpStderr(): void {
+    this.lastAcpStderr = undefined;
+    this.acpStderrLines = [];
+  }
+
+  private async isPortInUse(port: number): Promise<boolean> {
+    return WorkspaceUtils.isPortOpen(AcpClient.DEFAULT_HOST, port, 200);
+  }
+
+  private async buildPortCandidates(): Promise<number[]> {
+    const candidates: number[] = [];
+    const seen = new Set<number>();
+
+    const configPort = this.config.port;
+    if (Number.isInteger(configPort) && configPort > 0) {
+      candidates.push(configPort);
+      seen.add(configPort);
+    }
+
+    const lastPort = await this.sessionManager.getAcpServerPort();
+    if (lastPort !== undefined && Number.isInteger(lastPort) && lastPort > 0 && !seen.has(lastPort)) {
+      candidates.push(lastPort);
+      seen.add(lastPort);
+    }
+
+    for (let port = AcpClient.DEFAULT_ACP_PORT; port <= AcpClient.MAX_ACP_PORT; port++) {
+      if (!seen.has(port)) {
+        candidates.push(port);
+      }
+    }
+
+    if (candidates.length === 0) {
+      candidates.push(AcpClient.DEFAULT_ACP_PORT);
+    }
+
+    return candidates;
+  }
+
+  private stripAnsi(value: string): string {
+    return value.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+  }
+
+  private captureAcpStderr(data: Buffer): void {
+    const chunk = this.stripAnsi(data.toString());
+    const lines = chunk.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+    if (!lines.length) {
+      return;
+    }
+
+    for (const line of lines) {
+      this.acpStderrLines.push(line);
+    }
+
+    const maxLines = 3;
+    if (this.acpStderrLines.length > maxLines) {
+      this.acpStderrLines.splice(0, this.acpStderrLines.length - maxLines);
+    }
+
+    const combined = this.acpStderrLines.join(' | ');
+    const maxLength = 200;
+    this.lastAcpStderr = combined.length > maxLength
+      ? `${combined.slice(0, maxLength)}...`
+      : combined;
+  }
+
+  private summarizeErrorMessage(message: string): string {
+    const singleLine = message.replace(/\s+/g, ' ').trim();
+    const maxLength = 200;
+    return singleLine.length > maxLength
+      ? `${singleLine.slice(0, maxLength)}...`
+      : singleLine;
+  }
+
+  private formatConnectionError(error: Error): string {
+    const message = this.lastAcpStderr
+      ? `OpenCode startup failed: ${this.lastAcpStderr}`
+      : (error.message || 'Failed to start OpenCode');
+    return this.summarizeErrorMessage(message);
   }
 
   private async tryConnect(port: number): Promise<boolean> {
@@ -595,6 +701,7 @@ export class AcpClient {
 
     // Capture stderr to help troubleshoot startup failures.
     this.acpProcess.stderr?.on('data', (data: Buffer) => {
+      this.captureAcpStderr(data);
       const msg = data.toString().trim();
       if (msg) {
         ErrorHandler.debug(`[OpenCode stderr] ${msg}`);
